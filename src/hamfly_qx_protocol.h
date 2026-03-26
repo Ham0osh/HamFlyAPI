@@ -1,0 +1,4 @@
+#ifndef HAMFLY_QX_PROTOCOL_H
+#define HAMFLY_QX_PROTOCOL_H
+
+#endif /* HAMFLY_QX_PROTOCOL_H */

@@ -1,0 +1,39 @@
+# PSoC Creator artifacts
+*.cydsn/
+*.cywrk
+*.cywrk.*
+CortexM0/
+CortexM3/
+*.hex
+*.elf
+*.lss
+*.map
+*.srec
+
+# Build artifacts
+build/
+bin/
+obj/
+*.o
+*.a
+*.so
+*.lib
+*.dll
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.user
+*.VC.db
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+
+# Dependency files
+*.d

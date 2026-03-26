@@ -1,0 +1,4 @@
+#ifndef HAMFLY_CORE_CONTROL_H
+#define HAMFLY_CORE_CONTROL_H
+
+#endif /* HAMFLY_CORE_CONTROL_H */

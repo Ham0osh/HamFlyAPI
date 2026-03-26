@@ -1,0 +1,4 @@
+#ifndef HAMFLY_COMM_TXBUF_H
+#define HAMFLY_COMM_TXBUF_H
+
+#endif /* HAMFLY_COMM_TXBUF_H */
