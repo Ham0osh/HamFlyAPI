@@ -50,7 +50,13 @@ To add support for a new microprocessor:
 
 ## License
 
+Copyright 2026 Hamish Johnson
+Quantum Information Systems Lab, SFU Physics
 
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full license text.
+
+The QX protocol files (`hamfly_qx_protocol.*`, `hamfly_qx_app.*`) are derived from the
+Freefly QX Protocol (Copyright 2017 Freefly Systems), also licensed under Apache 2.0.
 
 ## Contributing
 
