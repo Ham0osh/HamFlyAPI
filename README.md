@@ -50,7 +50,7 @@ To add support for a new microprocessor:
 
 ## License
 
-[Add appropriate license]
+
 
 ## Contributing
 
