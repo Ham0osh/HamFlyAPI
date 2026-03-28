@@ -122,4 +122,35 @@ hamfly_result_t hamfly_write_attr_u8       (hamfly_gimbal_t *g,
 void hamfly_get_telemetry  (hamfly_gimbal_t *g, hamfly_telemetry_t  *out);
 void hamfly_get_statistics (hamfly_gimbal_t *g, hamfly_statistics_t *out);
 
+/* Utility helpers */
+
+/* Reset gimbal heading reference and baro home point via attr 382.
+ * GPS reference is unaffected (GPS is always absolute).
+ * After this call baro_alt_m will read ~0 once telemetry refreshes. */
+hamfly_result_t hamfly_home(hamfly_gimbal_t *g);
+
+/* Initiate compass calibration sequence.
+ * STUB — attr/command not yet confirmed from serial capture.
+ * Always returns HAMFLY_ERR_BAD_STATE until implemented. */
+hamfly_result_t hamfly_compass_cal_start(hamfly_gimbal_t *g);
+
+/* Calculate pointing angles from platform to target GPS coord.
+ * platform:           caller's current position (from telemetry).
+ * target:             where to point.
+ * heading_offset_deg: gimbal pan=0 offset from geographic North.
+ *   Pass 0.0f if attr 382 zeros to North (unconfirmed).
+ *   Pass compass heading at time of attr 382 call if it zeros to
+ *   current heading.
+ * out:     filled with azimuth, elevation, distance.
+ * ctl_out: if not NULL, filled with ABSOLUTE pan/tilt control
+ *          packet ready for hamfly_send_control(). roll = 0.
+ * Pure math — does not query gimbal state internally.
+ * Returns HAMFLY_ERR_ENCODE if geometry is degenerate (<0.1 m). */
+hamfly_result_t hamfly_calc_gps_pointing(
+    const hamfly_gps_coord_t *platform,
+    const hamfly_gps_coord_t *target,
+    float                     heading_offset_deg,
+    hamfly_pointing_t        *out,
+    hamfly_control_t         *ctl_out);
+
 #endif /* HAMFLY_CORE_GIMBAL_H */

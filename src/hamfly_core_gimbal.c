@@ -24,7 +24,9 @@
 #include "hamfly_core_telemetry.h"
 #include "hamfly_qx_protocol.h"
 #include "hamfly_qx_app.h"
+#include "hamfly.h"
 #include <string.h>
+#include <math.h>
 
 #define HAMFLY_QX_PORT  (QX_COMMS_PORT_UART)
 
@@ -410,4 +412,99 @@ void hamfly_get_statistics(hamfly_gimbal_t *g, hamfly_statistics_t *out)
     if (!g || !out) return;
     g->statistics.rb_drops = g->rxbuf.drops;
     *out = g->statistics;
+}
+
+// ============================================================================
+// Hamfly Home: Reset heading reference and baro home point.
+// ============================================================================
+hamfly_result_t hamfly_home(hamfly_gimbal_t *g)
+{
+    /* Attr 382 resets both:
+     *  - compass heading reference (North zeroing — unconfirmed)
+     *  - baro home reference (baro_alt_m reads ~0 after reset)
+     * GPS reference is unaffected (GPS is always absolute). */
+    return hamfly_write_attr_u8(g, HAMFLY_ATTR_HEADING_RESET, 0x01u);
+}
+
+// ============================================================================
+// Hamfly Compass Cal Start: Stub — attr not yet confirmed.
+// ============================================================================
+hamfly_result_t hamfly_compass_cal_start(hamfly_gimbal_t *g)
+{
+    /* TODO: compass calibration attr/command not yet confirmed.
+     * Steps to determine:
+     *  1. Initiate calibration from iOS app while sniffing serial.
+     *  2. Identify the attr write that triggers the sequence.
+     *  3. Confirm with flag_compass_error clearing in sysstat.
+     * Implement once attr is confirmed. */
+    (void)g;
+    return HAMFLY_ERR_BAD_STATE;
+}
+
+// ============================================================================
+// Hamfly Calc GPS Pointing: Flat-earth ENU pointing from platform to target.
+// ============================================================================
+// Uses double-precision intermediates for lat/lon conversion.
+// Flat-earth approximation valid for distances < ~10 km.
+// ============================================================================
+hamfly_result_t hamfly_calc_gps_pointing(
+    const hamfly_gps_coord_t *platform,
+    const hamfly_gps_coord_t *target,
+    float                     heading_offset_deg,
+    hamfly_pointing_t        *out,
+    hamfly_control_t         *ctl_out)
+{
+    if (!platform || !target || !out) return HAMFLY_ERR_ENCODE;
+
+    /* Convert int32 lat/lon to radians (double precision).
+     * 1e-7 deg/count * pi/180 = pi/1.8e9                    */
+    static const double DEG2RAD = 3.14159265358979323846 / 180.0;
+    static const double R_EARTH = 6371000.0;  /* metres */
+
+    double lat0_rad = (double)platform->lat_e7 * 1e-7 * DEG2RAD;
+    double dLat_deg = (double)(target->lat_e7 - platform->lat_e7) * 1e-7;
+    double dLon_deg = (double)(target->lon_e7 - platform->lon_e7) * 1e-7;
+
+    /* ENU components (metres). */
+    double E   = R_EARTH * dLon_deg * DEG2RAD * cos(lat0_rad);
+    double N   = R_EARTH * dLat_deg * DEG2RAD;
+    double U   = (double)(target->alt_baro_m - platform->alt_baro_m);
+
+    /* Horizontal distance. */
+    double d2d = sqrt(E * E + N * N);
+
+    /* Degenerate: platform and target are within 0.1 m horizontally. */
+    if (d2d < 0.1) return HAMFLY_ERR_ENCODE;
+
+    /* Azimuth: atan2(E, N) gives bearing clockwise from North. */
+    double az_rad = atan2(E, N);
+    double az_deg = az_rad / DEG2RAD;
+    if (az_deg < 0.0) az_deg += 360.0;
+
+    /* Elevation: angle above horizon. */
+    double el_deg = atan2(U, d2d) / DEG2RAD;
+
+    /* Populate output. */
+    out->azimuth_deg   = (float)az_deg;
+    out->elevation_deg = (float)el_deg;
+    out->distance_m    = (float)d2d;
+
+    /* Optionally fill a control packet ready for hamfly_send_control(). */
+    if (ctl_out) {
+        double pan_cmd = az_deg - (double)heading_offset_deg;
+        /* Normalise pan to [0, 360). */
+        while (pan_cmd <    0.0) pan_cmd += 360.0;
+        while (pan_cmd >= 360.0) pan_cmd -= 360.0;
+
+        ctl_out->pan       = (float)pan_cmd;
+        ctl_out->tilt      = (float)el_deg;
+        ctl_out->roll      = 0.0f;
+        ctl_out->pan_mode  = HAMFLY_ABSOLUTE;
+        ctl_out->tilt_mode = HAMFLY_ABSOLUTE;
+        ctl_out->roll_mode = HAMFLY_DEFER;
+        ctl_out->enable    = 1u;
+        ctl_out->kill      = 0u;
+    }
+
+    return HAMFLY_OK;
 }

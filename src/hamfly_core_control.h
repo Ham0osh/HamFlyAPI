@@ -46,4 +46,20 @@ typedef struct {
     uint8_t               kill;
 } hamfly_control_t;
 
+/* GPS coordinate for pointing calculations.
+ * Uses int32 lat/lon (not float) to preserve ~1m precision.
+ * alt_baro_m is baro-relative (from baro_alt_m, NOT gps_raw_alt). */
+typedef struct {
+    int32_t lat_e7;     /* latitude  * 1e7 (degrees) */
+    int32_t lon_e7;     /* longitude * 1e7 (degrees) */
+    float   alt_baro_m; /* baro-relative altitude in metres */
+} hamfly_gps_coord_t;
+
+/* Result of a pointing calculation. */
+typedef struct {
+    float azimuth_deg;   /* bearing to target: 0=N 90=E 180=S 270=W */
+    float elevation_deg; /* angle above horizon; negative = below    */
+    float distance_m;    /* horizontal (2D) ground distance          */
+} hamfly_pointing_t;
+
 #endif /* HAMFLY_CORE_CONTROL_H */
