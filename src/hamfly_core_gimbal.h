@@ -35,10 +35,12 @@
 
 // Return types of Hamfly API functions and their meanings.
 typedef enum {
-    HAMFLY_OK         = 0,
-    HAMFLY_ERR_UART   = 1,  // UART transmission failure.
-    HAMFLY_ERR_ENCODE = 2,  // Packet build failure.
-    HAMFLY_ERR_BUSY   = 3   // Attr request is already pending or tx busy.
+    HAMFLY_OK            = 0,
+    HAMFLY_ERR_UART      = 1,  /* UART transmission failure.        */
+    HAMFLY_ERR_ENCODE    = 2,  /* Packet build failure.             */
+    HAMFLY_ERR_BUSY      = 3,  /* Pending request or tx busy.       */
+    HAMFLY_ERR_NO_GPS    = 4,  /* GPS not locked — cannot point.    */
+    HAMFLY_ERR_BAD_STATE = 5   /* Invalid state for this call.      */
 } hamfly_result_t;
 
 // Struct accumulating debug statistics about communications.

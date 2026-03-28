@@ -47,4 +47,34 @@
 #include "hamfly_core_telemetry.h"
 #include "hamfly_core_gimbal.h"
 
+/* ============================================================
+ * Status flag bit positions in sysstat_status_flags
+ * (attr 1 off 5-6). Confirmed by cross-referencing:
+ *   indoor  0x0065 — no GPS lock
+ *   outdoor 0x006C — GPS locked
+ * bits 5,6 always set in normal operation (boot OK + running).
+ * ============================================================ */
+#define HAMFLY_FLAG_COMPASS_ERROR  (1u << 0)
+#define HAMFLY_FLAG_GPS_LOS        (1u << 1)
+#define HAMFLY_FLAG_RADIO_LOS      (1u << 2)
+#define HAMFLY_FLAG_GPS_LOCKED     (1u << 3)
+
+/* GPS quality thresholds for safe absolute pointing. */
+#define HAMFLY_GPS_MIN_HACC_M      5.0f  /* max HACC in metres  */
+#define HAMFLY_GPS_MIN_SATS        6u    /* min satellite count */
+
+/* ============================================================
+ * Attribute IDs
+ * ============================================================ */
+#define HAMFLY_ATTR_SYSSTAT        1u
+#define HAMFLY_ATTR_PLATFORM_ATT   2u
+#define HAMFLY_ATTR_BARO           3u
+#define HAMFLY_ATTR_GPS            4u
+#define HAMFLY_ATTR_MAG            12u
+#define HAMFLY_ATTR_EULER_ATT      22u
+#define HAMFLY_ATTR_SYSTEM_ECHO    48u
+#define HAMFLY_ATTR_QX277_CONTROL  277u
+#define HAMFLY_ATTR_QX287_STATUS   287u
+#define HAMFLY_ATTR_HEADING_RESET  382u
+
 #endif /* HAMFLY_H */

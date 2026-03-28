@@ -41,43 +41,76 @@ typedef struct {
     uint8_t gimbal_status2;
 
     // Attr 4: GPS
-    bool    gps_valid;
-    float   gps_lat_deg;
-    float   gps_lon_deg;
-    float   gps_alt_m;
-    float   gps_ground_spd_ms;
-    float   gps_heading_deg;
-    float   gps_hacc_m;
-    float   gps_vacc_m;
-    float   gps_sacc_ms;
-    int32_t gps_raw_lat;  // kept: float loses precision at 1e7
-    int32_t gps_raw_lon;
-    int32_t gps_raw_alt;
-    int16_t gps_raw_spd;
-    int16_t gps_raw_hdg;
-    int16_t gps_raw_hacc;
-    int16_t gps_raw_vacc;
-    int16_t gps_raw_sacc;
+    bool     gps_valid;
+    /* Populated from sysstat flag_gps_locked, not from attr 4. */
+    bool     gps_locked;
+    /* Float fields for display and logging only.
+     * Use int32 gps_raw_* fields for any pointing math. */
+    float    gps_lat_deg;
+    float    gps_lon_deg;
+    float    gps_alt_m;
+    float    gps_ground_spd_ms;
+    /* valid only when moving >0.5 m/s */
+    float    gps_heading_deg;
+    float    gps_hacc_m;
+    float    gps_vacc_m;
+    float    gps_sacc_ms;
+    /* Primary int32 fields — use these for pointing math. */
+    int32_t  gps_raw_lat;        /* /1e7 deg */
+    int32_t  gps_raw_lon;        /* /1e7 deg */
+    /* WGS-84 ellipsoid height in mm. NOT mean sea level.
+     * NOT reliable on cold start — GPS may take minutes to
+     * converge. Do not use for absolute altitude in pointing.
+     * Use baro_alt_m for relative altitude instead. */
+    int32_t  gps_raw_alt;
+    int16_t  gps_raw_spd;        /* /100 m/s */
+    /* /100 deg; valid only when moving >0.5 m/s */
+    int16_t  gps_raw_hdg;
+    uint16_t gps_raw_hacc;       /* /100 m */
+    uint16_t gps_raw_vacc;       /* /100 m */
+    uint16_t gps_raw_sacc;       /* /100 m/s */
 
     // Attr 3: Barometric altitude
     bool    baro_valid;
+    /* Altitude relative to home point at last attr 382 reset.
+     * NOT absolute altitude. Zero at boot or after reset.
+     * Positive = above home, negative = below home. */
     float   baro_alt_m;
+    /* TODO: scale changed /100 -> /1000 based on confirmed data
+     * (-33 m/s at rest was implausible; -3.3 m/s is plausible).
+     * Awaiting lift test to fully verify. */
     float   baro_roc_ms;
 
-    // Attr 22: Gimbal Euler (LE, must be requested)
-    bool    att_valid;
-    float   att_pitch_deg;       // off 1 /100
-    float   att_yaw_deg;         // off 3 /100
-    float   att_roll_deg;        // off 5 /100
-    float   att_roll_err_deg;    // off 7 /10
-    float   att_pitch_err_deg;   // off 9 /10
-    float   att_yaw_err_deg;     // off 11 /10
-    float   att_roll_rate_dps;   // off 13 /10
-    float   att_pitch_rate_dps;  // off 15 /10
-    float   att_yaw_rate_dps;    // off 17 /10
+    // Attr 22: Gimbal Euler (LE, must be requested).
+    // off 0: state byte (0x00 or 0xFF) — not decoded.
+    // Angles confirmed vs iOS (pitch ±0.11°, yaw ±1.23° drift).
+    bool     att_valid;
+    uint32_t att_timestamp_ms;
+    float    att_pitch_deg;       // off  1 /100 — confirmed
+    float    att_yaw_deg;         // off  3 /100 — confirmed
+    float    att_roll_deg;        // off  5 /100 — confirmed
+    /* Rates updated to off 9-14 /100 dps per confirmed iOS layout.
+     * Previous decode was off 13-18 at /10.
+     * TODO: verify rate values against iOS Charts screen. */
+    float    att_pitch_rate_dps;  // off  9 /100 dps
+    float    att_yaw_rate_dps;    // off 11 /100 dps
+    float    att_roll_rate_dps;   // off 13 /100 dps
+    /* TODO: off 7-8 purpose unconfirmed. Previously labelled
+     * roll_err /10, but confirmed layout puts rates at off 9,
+     * conflicting. Retained for capture. pitch/yaw err zeroed. */
+    float    att_roll_err_deg;    // off 7 /10 — unconfirmed
+    float    att_pitch_err_deg;   // unconfirmed — zeroed in decode
+    float    att_yaw_err_deg;     // unconfirmed — zeroed in decode
 
     // Attr 1: System status
     bool    sysstat_valid;
+    /* Decoded status flags — see HAMFLY_FLAG_* in hamfly.h.
+     * Confirmed: indoor 0x0065 (no GPS), outdoor 0x006C (locked).
+     * bits 5,6 always set in normal operation. */
+    bool    flag_compass_error;   /* bit 0 — compass not calibrated */
+    bool    flag_gps_los;         /* bit 1 — no GPS signal          */
+    bool    flag_radio_los;       /* bit 2 — no radio connected     */
+    bool    flag_gps_locked;      /* bit 3 — GPS has valid fix      */
     float   sysstat_batt_v;        // off 0  int16BE /100 V 
     uint8_t sysstat_gps_sats;      // off 2  uint8
     float   sysstat_temp_c;        // off 3  uint8   /3   C  
@@ -103,6 +136,20 @@ typedef struct {
     float   mag_off_z;        // off 15 /1000
     float   mag_declination;  // off 17 /10
 
+    /* Attr 48: System echo (composite read-only status block).
+     * Single read gives GPS lock state, rough position confirmation,
+     * and current pressure in one round trip. Good boot health check.
+     * Generic access: hamfly_request_attr(g, HAMFLY_ATTR_SYSTEM_ECHO).
+     * off 0-7: GPS position bytes (mirrors attr 4 lon/lat).
+     * off 8:   status byte: 0x09 = locked, 0xCB = no lock.
+     * off 9-10: pressure /10 mb (mirrors attr 1 off 9-10).
+     * off 11-12: IMU rate (mirrors attr 1 off 11-12).
+     * off 13:  always 0x00. */
+    bool    sysecho_valid;
+    bool    sysecho_gps_locked;   /* from off 8 status byte */
+    float   sysecho_pressure_mb;  /* off 9-10 /10 mb        */
+    int16_t sysecho_imu_rate;     /* off 11-12              */
+
 } hamfly_telemetry_t;
 
 // Public decoder functions used within switch statement in hamfly_pump().
@@ -118,6 +165,8 @@ void hamfly_decode_attitude (const uint8_t *p, uint16_t plen,
 void hamfly_decode_sysstat  (const uint8_t *p, uint16_t plen,
                              hamfly_telemetry_t *dst);
 void hamfly_decode_mag      (const uint8_t *p, uint16_t plen,
+                             hamfly_telemetry_t *dst);
+void hamfly_decode_sysecho  (const uint8_t *p, uint16_t plen,
                              hamfly_telemetry_t *dst);
 
 #endif /* HAMFLY_CORE_TELEMETRY_H */

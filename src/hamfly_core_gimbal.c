@@ -178,7 +178,9 @@ void hamfly_pump(hamfly_gimbal_t *g)
                 break;
                 case 12u: hamfly_decode_mag      (pay, rxlen, &g->telemetry);
                 break;
-                default: 
+                case 48u: hamfly_decode_sysecho  (pay, rxlen, &g->telemetry);
+                break;
+                default:
                 break;
             }
         }
