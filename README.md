@@ -1,10 +1,10 @@
 # HamFly API
 
-A C API for the HamFly flight control system. This is version 2 of the FreeflyAPI, preserving backward compatibility with the existing QX protocol while adding enhanced packet sending and receiving capabilities.
+A C API for the Freefly ecosystem developed for the Movi Pro. This is an unofficial version 2 of the FreeflyAPI, preserving backward compatibility with the existing QX protocol while adding enhanced packet sending and receiving capabilities.
 
 ## Overview
 
-HamFly is designed to work with PSoC 5 LP microcontrollers using PSoC Creator 4.4, while maintaining flexibility for future microprocessor support.
+HamFly was designed to for integration PSoC 5 LP microcontrollers using PSoC Creator 4.4, while maintaining flexibility for future microprocessor support. Please read the original [FreeflyAPI documentation](<docs/old_Freefly_API/Freefly API Version 1.0.pdf>).
 
 ## Project Structure
 
@@ -23,6 +23,7 @@ HamflyAPI/
 
 ### PSoC Creator Integration
 
+See [Adding New Platforms](#adding-new-platforms) to see available hardware interfaces, or to quickly develop your own.\
 1. Copy all files from the `src/` directory into your PSoC Creator project
 2. Include `hamfly_core_hal.h` in your project to access the HAL interface
 3. Use the PSoC5-specific implementation from `platform/hamfly_platform_psoc5.h`
@@ -31,7 +32,6 @@ HamflyAPI/
 
 - **src/**: Contains all portable core API code. These files implement the HamFly API interface.
 - **platform/**: Contains platform-specific implementations. Currently includes PSoC5 support.
-  - `hamfly_platform_psoc5.h`: Implements the HAL interface for PSoC5 LP
 
 ## Features
 
@@ -44,7 +44,7 @@ HamflyAPI/
 
 To add support for a new microprocessor:
 
-1. Create `platform/hamfly_platform_{microprocessor}.h`
+1. Create `platform/hamfly_platform_{microprocessor}.h` (or your own naming)
 2. Implement the HAL interface defined in `src/hamfly_core_hal.h`
 3. Include the appropriate platform implementation in your build system
 
