@@ -10,7 +10,7 @@ HamFly is designed to work with PSoC 5 LP microcontrollers using PSoC Creator 4.
 
 ```
 HamflyAPI/
-├── src/                    # Core portable API code
+├── src/                   # Core portable API code
 │   ├── hamfly.h           # Main API entry point
 │   ├── hamfly_core_*.h/c  # Core functionality (HAL, control, telemetry, gimbal)
 │   ├── hamfly_comm_*.h/c  # Communication utilities (ring buffer, TX buffer)
@@ -61,3 +61,13 @@ Freefly QX Protocol (Copyright 2017 Freefly Systems), also licensed under Apache
 ## Contributing
 
 This API is designed for active development. Feel free to extend and modify as needed for your use case.
+
+## Movi Community
+
+With the apparent dissapearance of the forum, I thought it would be nice to accumulate other peoples efforts to work with the Movi Pro (and maybe someday other Freefly products).\
+
+[Movi Pro ardunio custom remote](https://www.thingiverse.com/thing:4287654) by Caz on Thingverse.\
+[Mini Movi Controller V2](https://www.thingiverse.com/thing:4672980) by Caz on Thingverse.\
+Both seem to send commands over serial to a Mimic which communicates with the GCU. Projects under a Creative Commons license.\
+
+Thingverse and other maker libraries have many custom components, brackets, and mounts to explore.
