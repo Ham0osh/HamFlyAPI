@@ -268,7 +268,7 @@ void QX_SendMsg2CommsPort_CB(QX_Msg_t *TxMsg_p)
         case QX_COMMS_PORT_UART:
             TxMsg_p->MsgBuf_p = TxMsg_p->MsgBufStart_p;
             for (i = 0; i < TxMsg_p->MsgBuf_MsgLen; i++)
-                hamfly_txbuf_add(&qx_active_gimbal->txbuf, *TxMsg_p->MsgBuf_p++);
+                hamfly_rb_push(&qx_active_gimbal->txbuf, *TxMsg_p->MsgBuf_p++);
             break;
         default:
             break;

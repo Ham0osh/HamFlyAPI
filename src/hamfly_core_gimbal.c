@@ -56,11 +56,11 @@ static void copy_qx287_to_telemetry(hamfly_telemetry_t *tel)
 }
 
 // Drain the txbuf and send bytes into the HAL.
-static uint32_t drain_txbuf(hamfly_gimbal_t *g)
+static uint32_t drain_rb(hamfly_gimbal_t *g)
 {
     uint8_t  byte;
     uint32_t sent = 0u;
-    while (hamfly_txbuf_remove(&g->txbuf, &byte)) {
+    while (hamfly_rb_pop(&g->txbuf, &byte)) {
         g->hal.uart_putc(g->hal.ctx, byte);
         sent++;
     }
@@ -123,7 +123,7 @@ void hamfly_on_rx_byte(hamfly_gimbal_t *g, uint8_t b)
 {
     if (!g) return;
     (void)hamfly_rb_push(&g->rxbuf, b);
-    g->statistics.rb_drops = g->rxbuf.drops;
+    g->statistics.rxbuf_drops = g->rxbuf.drops;
 }
 
 // ISR calls to set UART error flags.
@@ -216,7 +216,7 @@ void hamfly_pump(hamfly_gimbal_t *g)
     if (chkfail_after > chkfail_before)
         g->statistics.rx_bad_checksum += (chkfail_after - chkfail_before);
     // Count any drops from the ring buffer as well.
-    g->statistics.rb_drops = g->rxbuf.drops;
+    g->statistics.rxbuf_drops = g->rxbuf.drops;
 }
 
 // ============================================================================
@@ -311,7 +311,7 @@ hamfly_result_t hamfly_request_attr_capture(hamfly_gimbal_t *g,
     uint32_t sent = 0u;
     uint8_t  cap  = 0u;
     // Drain the txbuf one by one and parse into user_txbuf.
-    while (hamfly_rb_remove(&g->txbuf, &byte)) {
+    while (hamfly_rb_pop(&g->txbuf, &byte)) {
         g->hal.uart_putc(g->hal.ctx, byte);
         if (user_txbuf && cap < user_txbuf_max) user_txbuf[cap++] = byte;
         sent++;
@@ -410,7 +410,7 @@ void hamfly_get_telemetry(hamfly_gimbal_t *g, hamfly_telemetry_t *out)
 void hamfly_get_statistics(hamfly_gimbal_t *g, hamfly_statistics_t *out)
 {
     if (!g || !out) return;
-    g->statistics.rb_drops = g->rxbuf.drops;
+    g->statistics.rxbuf_drops = g->rxbuf.drops;
     *out = g->statistics;
 }
 
