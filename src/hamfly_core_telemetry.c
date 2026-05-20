@@ -20,6 +20,7 @@
 #include "hamfly_qx_protocol.h"
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 
 // ============================================================================
 // Helpers: Big and Little Endian readers.
@@ -54,6 +55,52 @@ static int16_t rd_le16(const uint8_t *p)
     int16_t v;
     memcpy(&v, p, 2);
     return v;
+}
+
+// ============================================================================
+// Hamfly Telemetry to Euler
+// ============================================================================
+// Converts the RIJK quaternion from attr 287 to Pan/Tilt/Roll Euler angles
+// using the ZYX rotation sequence (yaw → pitch → roll), which matches the
+// FreeflyAPI Euler convention (pan = yaw about Z, tilt = pitch about Y,
+// roll = rotation about X).
+//
+// RIJK → standard (w, x, y, z):
+//   w = gimbal_r,  x = gimbal_i,  y = gimbal_j,  z = gimbal_k
+//
+// Gimbal-lock guard: clamps the asinf argument to [-1, +1] before use.
+// ============================================================================
+uint8_t hamfly_telemetry_to_euler(const hamfly_telemetry_t *t,
+                                  float *pan_deg,
+                                  float *tilt_deg,
+                                  float *roll_deg)
+{
+    if (!t || !t->valid) return 0u;
+
+    static const float RAD2DEG = 180.0f / 3.14159265358979f;
+
+    float w = t->gimbal_r;
+    float x = t->gimbal_i;
+    float y = t->gimbal_j;
+    float z = t->gimbal_k;
+
+    /* Pan (yaw, Z-axis) */
+    if (pan_deg)
+        *pan_deg  = atan2f(2.0f*(w*z + x*y), 1.0f - 2.0f*(y*y + z*z)) * RAD2DEG;
+
+    /* Tilt (pitch, Y-axis) — clamp to [-1, 1] to avoid NaN at gimbal lock. */
+    if (tilt_deg) {
+        float sin_tilt = 2.0f*(w*y - z*x);
+        if      (sin_tilt >  1.0f) sin_tilt =  1.0f;
+        else if (sin_tilt < -1.0f) sin_tilt = -1.0f;
+        *tilt_deg = asinf(sin_tilt) * RAD2DEG;
+    }
+
+    /* Roll (X-axis) */
+    if (roll_deg)
+        *roll_deg = atan2f(2.0f*(w*x + y*z), 1.0f - 2.0f*(x*x + y*y)) * RAD2DEG;
+
+    return 1u;
 }
 
 // ============================================================================
