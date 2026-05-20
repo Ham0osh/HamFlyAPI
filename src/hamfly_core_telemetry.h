@@ -152,6 +152,16 @@ typedef struct {
 
 } hamfly_telemetry_t;
 
+/* Convert the quaternion in telemetry (RIJK from attr 287) to Euler angles.
+ * Axis order: Pan (yaw), Tilt (pitch), Roll — FreeflyAPI convention, ZYX.
+ * Fills only the non-NULL output pointers. Clamps asinf argument to ±1
+ * (gimbal-lock boundary) before conversion.
+ * Returns 1 and fills outputs (degrees) if telemetry valid, else 0. */
+uint8_t hamfly_telemetry_to_euler(const hamfly_telemetry_t *t,
+                                  float *pan_deg,
+                                  float *tilt_deg,
+                                  float *roll_deg);
+
 // Public decoder functions used within switch statement in hamfly_pump().
 // Safe to call on example byte arrays while offline, or use for live testing.
 void hamfly_decode_qx287    (const uint8_t *p, uint16_t plen, 

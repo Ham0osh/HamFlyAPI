@@ -415,6 +415,28 @@ void hamfly_get_statistics(hamfly_gimbal_t *g, hamfly_statistics_t *out)
 }
 
 // ============================================================================
+// Hamfly Control Init: safe inert default for a new control struct.
+// ============================================================================
+void hamfly_control_init(hamfly_control_t *c)
+{
+    if (!c) return;
+    memset(c, 0, sizeof(*c));
+    /* All axes DEFER, enable=0 (inert until app opts in), kill=0. */
+    c->pan_mode  = HAMFLY_DEFER;
+    c->tilt_mode = HAMFLY_DEFER;
+    c->roll_mode = HAMFLY_DEFER;
+}
+
+// ============================================================================
+// Hamfly Is Killed: report last commanded kill state.
+// ============================================================================
+uint8_t hamfly_is_killed(const hamfly_gimbal_t *g)
+{
+    if (!g) return 0u;
+    return g->ctl.kill ? 1u : 0u;
+}
+
+// ============================================================================
 // Hamfly Home: Reset heading reference and baro home point.
 // ============================================================================
 hamfly_result_t hamfly_home(hamfly_gimbal_t *g)

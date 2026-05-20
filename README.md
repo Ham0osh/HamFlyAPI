@@ -58,6 +58,41 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the f
 The QX protocol files (`hamfly_qx_protocol.*`, `hamfly_qx_app.*`) are derived from the
 Freefly QX Protocol (Copyright 2017 Freefly Systems), also licensed under Apache 2.0.
 
+## FreeflyAPI Behavioral Notes
+
+These are behaviors of the MōVI Pro / FreeflyAPI protocol — not HamFlyAPI
+bugs — that have cost integrators real design time. Documented here so the
+next integrator doesn't rediscover them.
+
+### Pan rebase on new input
+
+The **first ABSOLUTE Pan command from a new input source** re-zeros the pan
+reference to the current pan angle: an offset is applied such that the
+current pan angle is maintained at the commanded value. Subsequent ABSOLUTE
+pan commands are then relative to that rebased zero, not to an external
+frame. Tilt and Roll are true-absolute commands (bounded by configured
+limits).
+
+Practical consequence:
+- **Relative pan nudges are trivial**: command the desired delta directly.
+- **External-frame absolute pan** (e.g. heading from GPS) requires correcting
+  for the rebase offset. Use the orientation reported in `FreeflyAPI.status`
+  (gimbal quaternion) to determine the true current angle and compute the
+  offset before issuing an absolute command.
+
+### 500 ms inactivity timeout → axes revert to DEFER
+
+If no control packet is received for approximately 500 ms, all axes revert to
+DEFER (single-operator Majestic). ABSOLUTE mode is explicitly **less tolerant
+of input-timing variation than RATE** — the spec recommends fast, evenly
+spaced inputs (~100 Hz).
+
+**Important corollary — do not de-duplicate ABSOLUTE commands.**
+A "send only on change" or de-dup optimization is unsafe for ABSOLUTE mode:
+it starves the timing-sensitive stream and risks triggering the timeout. It
+is acceptable for RATE only, and even then a sub-500 ms heartbeat must
+re-send the last command so control is never dropped.
+
 ## Contributing
 
 This API is designed for active development. Feel free to extend and modify as needed for your use case.
