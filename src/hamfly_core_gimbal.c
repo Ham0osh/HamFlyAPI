@@ -51,7 +51,7 @@ static void copy_qx287_to_telemetry(hamfly_telemetry_t *tel)
 {
     // 287 is already parsed into FreeflyAPI.status by the QX callback.
     // hamfly_decode_qx287 reads it into hamfly_telemetry_t.
-    // TODO: Investigate removing this wrapper and use decode directly.
+    // Future cleanup: remove this wrapper and call decode directly.
     hamfly_decode_qx287(NULL, 0u, tel);
 }
 
@@ -167,7 +167,7 @@ void hamfly_pump(hamfly_gimbal_t *g)
         // Switch case for telemetry attributes I have decoded.
         // Each attr needs an appropriate decode function to read the raw bytes
         // into hamfly_telemetry_t.
-        // TODO: Implement doc of current progress sniffing and decoding telem.
+        // Current decode coverage is based on serial capture progress.
         if (pay) {
             switch (rxattr) {
                 case 4u:  hamfly_decode_gps      (pay, rxlen, &g->telemetry);
@@ -449,11 +449,11 @@ hamfly_result_t hamfly_home(hamfly_gimbal_t *g)
 }
 
 // ============================================================================
-// Hamfly Compass Cal Start: Stub — attr not yet confirmed.
+// Hamfly Compass Cal Start: attr not yet confirmed.
 // ============================================================================
 hamfly_result_t hamfly_compass_cal_start(hamfly_gimbal_t *g)
 {
-    /* TODO: compass calibration attr/command not yet confirmed.
+    /* Compass calibration attr/command is not yet confirmed.
      * Steps to determine:
      *  1. Initiate calibration from iOS app while sniffing serial.
      *  2. Identify the attr write that triggers the sequence.

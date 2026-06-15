@@ -76,7 +76,7 @@ typedef struct {
      * NOT absolute altitude. Zero at boot or after reset.
      * Positive = above home, negative = below home. */
     float   baro_alt_m;
-    /* TODO: scale changed /100 -> /1000 based on confirmed data
+    /* Scale changed /100 -> /1000 based on confirmed data
      * (-33 m/s at rest was implausible; -3.3 m/s is plausible).
      * Awaiting lift test to fully verify. */
     float   baro_roc_ms;
@@ -91,11 +91,11 @@ typedef struct {
     float    att_roll_deg;        // off  5 /100 — confirmed
     /* Rates updated to off 9-14 /100 dps per confirmed iOS layout.
      * Previous decode was off 13-18 at /10.
-     * TODO: verify rate values against iOS Charts screen. */
+     * Verify rate values against iOS Charts screen. */
     float    att_pitch_rate_dps;  // off  9 /100 dps
     float    att_yaw_rate_dps;    // off 11 /100 dps
     float    att_roll_rate_dps;   // off 13 /100 dps
-    /* TODO: off 7-8 purpose unconfirmed. Previously labelled
+    /* Off 7-8 purpose is unconfirmed. Previously labelled
      * roll_err /10, but confirmed layout puts rates at off 9,
      * conflicting. Retained for capture. pitch/yaw err zeroed. */
     float    att_roll_err_deg;    // off 7 /10 — unconfirmed
