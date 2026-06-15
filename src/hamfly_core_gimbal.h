@@ -124,6 +124,15 @@ void hamfly_get_statistics (hamfly_gimbal_t *g, hamfly_statistics_t *out);
 
 /* Utility helpers */
 
+/* Zero-initialise a control struct to a safe inert state:
+ * all axes DEFER, enable=0, kill=0.
+ * Using enable=0 (not 1) so the app explicitly opts in before sending. */
+void hamfly_control_init(hamfly_control_t *c);
+
+/* Returns 1 if the last commanded packet had kill=1, else 0.
+ * Reads g->ctl which is updated on every hamfly_send_control(). */
+uint8_t hamfly_is_killed(const hamfly_gimbal_t *g);
+
 /* Reset gimbal heading reference and baro home point via attr 382.
  * GPS reference is unaffected (GPS is always absolute).
  * After this call baro_alt_m will read ~0 once telemetry refreshes. */

@@ -123,24 +123,27 @@ static uint8_t *QX_ParsePacket_Cli_MoVI_Ctrl_CB(QX_Msg_t *Msg_p)
             {
                 uint8_t pan_input_type;
                 switch (FreeflyAPI.control.pan.type) {
-                    case DEFER:    pan_input_type = INPUT_CONTROL_RZ_DEFER; break;
-                    case RATE:     pan_input_type = INPUT_CONTROL_RZ_RATE;  break;
-                    case ABSOLUTE: pan_input_type = INPUT_CONTROL_RZ_ABS;   break;
-                    default:       pan_input_type = INPUT_CONTROL_RZ_DEFER; break;
+                    case DEFER:             pan_input_type = INPUT_CONTROL_RZ_DEFER;   break;
+                    case RATE:              pan_input_type = INPUT_CONTROL_RZ_RATE;    break;
+                    case ABSOLUTE:          pan_input_type = INPUT_CONTROL_RZ_ABS;     break;
+                    case ABSOLUTE_MAJESTIC: pan_input_type = INPUT_CONTROL_RZ_ABS_MAJ; break;
+                    default:                pan_input_type = INPUT_CONTROL_RZ_DEFER;   break;
                 }
                 uint8_t tilt_input_type;
                 switch (FreeflyAPI.control.tilt.type) {
-                    case DEFER:    tilt_input_type = INPUT_CONTROL_RY_DEFER; break;
-                    case RATE:     tilt_input_type = INPUT_CONTROL_RY_RATE;  break;
-                    case ABSOLUTE: tilt_input_type = INPUT_CONTROL_RY_ABS;   break;
-                    default:       tilt_input_type = INPUT_CONTROL_RY_DEFER; break;
+                    case DEFER:             tilt_input_type = INPUT_CONTROL_RY_DEFER;   break;
+                    case RATE:              tilt_input_type = INPUT_CONTROL_RY_RATE;    break;
+                    case ABSOLUTE:          tilt_input_type = INPUT_CONTROL_RY_ABS;     break;
+                    case ABSOLUTE_MAJESTIC: tilt_input_type = INPUT_CONTROL_RY_ABS_MAJ; break;
+                    default:                tilt_input_type = INPUT_CONTROL_RY_DEFER;   break;
                 }
                 uint8_t roll_input_type;
                 switch (FreeflyAPI.control.roll.type) {
-                    case DEFER:    roll_input_type = INPUT_CONTROL_RX_DEFER; break;
-                    case RATE:     roll_input_type = INPUT_CONTROL_RX_RATE;  break;
-                    case ABSOLUTE: roll_input_type = INPUT_CONTROL_RX_ABS;   break;
-                    default:       roll_input_type = INPUT_CONTROL_RX_DEFER; break;
+                    case DEFER:             roll_input_type = INPUT_CONTROL_RX_DEFER;   break;
+                    case RATE:              roll_input_type = INPUT_CONTROL_RX_RATE;    break;
+                    case ABSOLUTE:          roll_input_type = INPUT_CONTROL_RX_ABS;     break;
+                    case ABSOLUTE_MAJESTIC: roll_input_type = INPUT_CONTROL_RX_ABS_MAJ; break;
+                    default:                roll_input_type = INPUT_CONTROL_RX_DEFER;   break;
                 }
 
                 temp_UC_buffer[0] = pan_input_type | tilt_input_type | roll_input_type;

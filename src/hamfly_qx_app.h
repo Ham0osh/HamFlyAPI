@@ -48,9 +48,10 @@ typedef enum {
  * Must stay in sync with hamfly_control_mode_t values.
  * ============================================================ */
 typedef enum {
-    DEFER    = 0,
-    RATE     = 1,
-    ABSOLUTE = 2
+    DEFER             = 0,
+    RATE              = 1,
+    ABSOLUTE          = 2,
+    ABSOLUTE_MAJESTIC = 3   /* absolute + MōVI Pro window/smoothing */
 } ff_api_control_type_e;
 
 /* ============================================================

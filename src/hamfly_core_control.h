@@ -28,9 +28,17 @@
 
 // Must match ff_api_control_type_e in qx_app.h for posterity.
 typedef enum {
-    HAMFLY_DEFER    = 0,
-    HAMFLY_RATE     = 1,
-    HAMFLY_ABSOLUTE = 2
+    HAMFLY_DEFER             = 0,
+    HAMFLY_RATE              = 1,
+    HAMFLY_ABSOLUTE          = 2,
+    /* Absolute with MōVI Pro window/smoothing (Majestic Mode).
+     * Window and smoothing parameters are configured in the MōVI Pro app;
+     * they are not carried in this packet. On the wire this is the 2-bit
+     * per-axis control-type field taking value 0b11.
+     * Use this instead of HAMFLY_ABSOLUTE when the active stabilization
+     * loop hunts around a hard setpoint — it trades pointing stiffness
+     * for steady-state smoothness. */
+    HAMFLY_ABSOLUTE_MAJESTIC = 3
 } hamfly_control_mode_t;
 
 // Control packet struct. Gets built by the user and sent to the gimbal on
