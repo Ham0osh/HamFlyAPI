@@ -16,7 +16,12 @@ HamflyAPI/
 │   ├── hamfly_comm_*.h/c  # Communication utilities (ring buffer, TX buffer)
 │   └── hamfly_qx_*.h/c    # QX protocol implementation (backward compatible)
 └── platform/              # Platform-specific implementations
-    └── hamfly_platform_psoc5.h  # PSoC5 LP implementation
+    ├── hamfly_platform_psoc5.h      # PSoC5 LP implementation
+    ├── hamfly_platform_arduino.h    # Generic Arduino HardwareSerial HAL
+    ├── hamfly_platform_esp32_idf.h  # ESP32 ESP-IDF native HAL
+    ├── hamfly_platform_linux.h      # Linux/POSIX host HAL
+    ├── hamfly_platform_pico.h       # Raspberry Pi Pico SDK HAL
+    └── hamfly_platform_stm32.h      # STM32 HAL
 ```
 
 ## Getting Started
@@ -31,7 +36,7 @@ See [Adding New Platforms](#adding-new-platforms) to see available hardware inte
 ### File Organization
 
 - **src/**: Contains all portable core API code. These files implement the HamFly API interface.
-- **platform/**: Contains platform-specific implementations. Currently includes PSoC5 support.
+- **platform/**: Contains platform-specific implementations for PSoC5, Arduino, ESP32 IDF, Linux, Pico, and STM32.
 
 ## Features
 
