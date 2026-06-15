@@ -68,7 +68,7 @@ typedef struct {
     hamfly_rb_t         txbuf;  // Tx on main loop push (user programmed)
 
     // The GCU address (Default = QX_DEV_ID_GIMBAL = 2).
-    // TODO: set per-instance for multi-gimbal.
+    // Default instance ID; make per-instance if multi-gimbal support is added.
     uint8_t gimbal_id;
 
     // Handles pending transactions for request_attr and write_attr_u8.
@@ -139,7 +139,7 @@ uint8_t hamfly_is_killed(const hamfly_gimbal_t *g);
 hamfly_result_t hamfly_home(hamfly_gimbal_t *g);
 
 /* Initiate compass calibration sequence.
- * STUB — attr/command not yet confirmed from serial capture.
+ * Attr/command not yet confirmed from serial capture.
  * Always returns HAMFLY_ERR_BAD_STATE until implemented. */
 hamfly_result_t hamfly_compass_cal_start(hamfly_gimbal_t *g);
 

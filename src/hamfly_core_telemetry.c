@@ -207,7 +207,7 @@ void hamfly_decode_baro(const uint8_t *p, uint16_t plen,
 // off 5-6  LE int16: Roll  /100 deg — confirmed vs iOS
 // off 7-8  LE int16: unknown (was roll_err /10; unconfirmed)
 // off 9-14  LE int16 x3: rates /100 dps — updated per iOS layout
-//   TODO: verify rate values against iOS Charts screen.
+//   Verify rate values against iOS Charts screen.
 //   Previous decode placed rates at off 13-18 at /10.
 // ============================================================================
 void hamfly_decode_attitude(const uint8_t *p, uint16_t plen,
@@ -225,7 +225,7 @@ void hamfly_decode_attitude(const uint8_t *p, uint16_t plen,
     dst->att_roll_err_deg = (float)rd_le16(p + 7) / 10.0f;
 
     /* Rates: updated to off 9-14 /100 per confirmed iOS layout.
-     * TODO: verify values against iOS Charts screen. */
+     * Verify values against iOS Charts screen. */
     dst->att_pitch_rate_dps = (float)rd_le16(p +  9) / 100.0f;
     dst->att_yaw_rate_dps   = (float)rd_le16(p + 11) / 100.0f;
     dst->att_roll_rate_dps  = (float)rd_le16(p + 13) / 100.0f;
