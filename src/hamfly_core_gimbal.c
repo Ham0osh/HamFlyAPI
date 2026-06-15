@@ -51,7 +51,7 @@ static void copy_qx287_to_telemetry(hamfly_telemetry_t *tel)
 {
     // 287 is already parsed into FreeflyAPI.status by the QX callback.
     // hamfly_decode_qx287 reads it into hamfly_telemetry_t.
-    // Future cleanup: remove this wrapper and call decode directly.
+    // Wrapper keeps telemetry sync localized to this call site.
     hamfly_decode_qx287(NULL, 0u, tel);
 }
 
