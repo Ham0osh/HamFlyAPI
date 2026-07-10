@@ -122,6 +122,19 @@ hamfly_result_t hamfly_write_attr_u8       (hamfly_gimbal_t *g,
 void hamfly_get_telemetry  (hamfly_gimbal_t *g, hamfly_telemetry_t  *out);
 void hamfly_get_statistics (hamfly_gimbal_t *g, hamfly_statistics_t *out);
 
+/* Exact int16 pan/tilt/roll words the last hamfly_send_control() put on the
+ * QX277 wire (mirrors AddFloatAsSignedShort: scale 32767, round-half-away, no
+ * clamp). Reads g->ctl. NULL out-pointers are skipped. Lets a logger record the
+ * transmitted word rather than re-scaling a float. */
+void hamfly_get_control_wire_i16(const hamfly_gimbal_t *g,
+                                 int16_t *pan, int16_t *tilt, int16_t *roll);
+
+/* Frame-complete hook. hamfly_pump() calls this once per checksum-valid QX
+ * frame, in main-loop context (NOT an ISR). The library ships a weak no-op;
+ * define a strong override with this exact signature to be notified (e.g. to
+ * toggle a debug pin, DPIN_MOVI_FRAME, on Movi telemetry frame arrival). */
+void hamfly_on_frame_complete(hamfly_gimbal_t *g);
+
 /* Utility helpers */
 
 /* Zero-initialise a control struct to a safe inert state:

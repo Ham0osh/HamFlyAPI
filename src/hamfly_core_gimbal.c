@@ -34,6 +34,15 @@
 // Internal helpers: load/save between hamfly_control_t and FreeflyAPI.control
 // ============================================================================
 
+// Convert a normalized control float to the exact int16 word placed on the QX
+// wire. Mirrors AddFloatAsSignedShort() in hamfly_qx_protocol.c bit-for-bit
+// (scale 32767, round-half-away-from-zero, plain cast — no clamp), so the value
+// returned here is the number the gimbal actually receives, not a re-scale.
+static int16_t hamfly_float_to_wire_ss(float v)
+{
+    return (int16_t)((v * 32767.0f) + 0.5f * ((0.0f < v) - (v < 0.0f)));
+}
+
 // Copy the control struct into the existing FreeflyAPI.control struct for Tx.
 static void load_freefly_control(const hamfly_control_t *ctl)
 {
@@ -153,6 +162,11 @@ void hamfly_pump(hamfly_gimbal_t *g)
         if (!got_packet) continue;  // Stops here unless complete packet.
         
         g->statistics.rx_packets++;  // Count a full packet.
+
+        // Frame-complete hook: fires once per checksum-valid QX frame, in main-
+        // loop (pump) context — NOT an ISR. Default is a weak no-op; the MCU
+        // integration overrides it (e.g. toggle DPIN_MOVI_FRAME on a scope).
+        hamfly_on_frame_complete(g);
 
         // Grab the packet data out of the QX state machine for parsing.
         QX_CommsPort_t *port = &QX_CommsPorts[HAMFLY_QX_PORT];
@@ -412,6 +426,32 @@ void hamfly_get_statistics(hamfly_gimbal_t *g, hamfly_statistics_t *out)
     if (!g || !out) return;
     g->statistics.rxbuf_drops = g->rxbuf.drops;
     *out = g->statistics;
+}
+
+// Expose the exact int16 pan/tilt/roll words the LAST hamfly_send_control()
+// placed on the QX277 wire. Lets a logger record the transmitted word instead of
+// re-scaling a float and hoping the rounding matches. Reads g->ctl (updated on
+// every send); any NULL out-pointer is skipped. Per-axis, so wire byte order is
+// irrelevant. See docs/2026-07-08_encoding_timing_report.md (encoding fixes).
+void hamfly_get_control_wire_i16(const hamfly_gimbal_t *g,
+                                 int16_t *pan, int16_t *tilt, int16_t *roll)
+{
+    if (!g) return;
+    if (pan)  *pan  = hamfly_float_to_wire_ss(g->ctl.pan);
+    if (tilt) *tilt = hamfly_float_to_wire_ss(g->ctl.tilt);
+    if (roll) *roll = hamfly_float_to_wire_ss(g->ctl.roll);
+}
+
+// Weak default frame-complete hook. Called once per checksum-valid QX frame from
+// hamfly_pump(). No-op unless the application provides a strong override of the
+// same signature (the linker prefers the strong symbol). Intended for the MCU to
+// mark Movi frame arrival on a debug pin (DPIN_MOVI_FRAME).
+#if defined(__GNUC__)
+__attribute__((weak))
+#endif
+void hamfly_on_frame_complete(hamfly_gimbal_t *g)
+{
+    (void)g;
 }
 
 // ============================================================================

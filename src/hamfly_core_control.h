@@ -41,6 +41,17 @@ typedef enum {
     HAMFLY_ABSOLUTE_MAJESTIC = 3
 } hamfly_control_mode_t;
 
+/* Full-scale angular rate, in mrad/s, that a normalized RATE command of 1.0
+ * (the wire max, int16 +32767) commands the gimbal to slew at. Needed to turn a
+ * logged normalized/int16 RATE word into a physical rate for the control report.
+ *
+ * UNMEASURED — left at 0 as an explicit "undefined" sentinel. Do NOT invent a
+ * value: an assumed scale would silently mis-calibrate every logged rate.
+ * TODO: measure via experiment T1 in docs/2026-07-08_encoding_timing_report.md
+ *       (command a known normalized rate, time/scope the gimbal sweep, back out
+ *       mrad/s), then replace the 0 here with the measured constant. */
+#define HAMFLY_RATE_FULLSCALE_MRAD_S 0  /* 0 == undefined (see TODO / T1) */
+
 // Control packet struct. Gets built by the user and sent to the gimbal on
 // hamfly_send_control() in hamfly_core_control.c.
 typedef struct {
