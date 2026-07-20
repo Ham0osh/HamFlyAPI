@@ -93,6 +93,41 @@ it starves the timing-sensitive stream and risks triggering the timeout. It
 is acceptable for RATE only, and even then a sub-500 ms heartbeat must
 re-send the last command so control is never dropped.
 
+## Migrating from v1
+
+### Breaking: `enable` is now enforced as a send-gate
+
+In v1, `hamfly_control_t.enable` was documented as an explicit opt-in but was
+never actually read — a caller who built a control struct and left `enable = 0`
+still commanded the gimbal. As of v2 the field is honoured:
+
+```c
+hamfly_send_control(g, ctl);   /* returns HAMFLY_ERR_BAD_STATE if !ctl->enable */
+```
+
+**Action required:** set `ctl.enable = 1` once your app is ready to command
+motion. `hamfly_control_init()` still zeroes it, so init-then-send now returns
+`HAMFLY_ERR_BAD_STATE` instead of moving the gimbal.
+
+`hamfly_kill()` deliberately bypasses this gate — an emergency stop is never
+blocked by the opt-in.
+
+### Non-breaking hardening in the same release
+
+- **PSoC5 HAL**: `hamfly_psoc5_hal()` now zero-initialises the HAL struct.
+  Previously `get_tick_ms` was left indeterminate and was called on the first
+  valid RX frame (undefined behaviour — the `if (ptr)` guard is defeated by a
+  garbage non-NULL pointer). Custom HAL constructors must zero any field they
+  do not set.
+- **Control values are clamped to ±1.0** before serialisation. Previously
+  `|value| > 1.0` overflowed the int16 and wrapped, so `1.5` became `-16386` —
+  a near-full-scale command in the *opposite* direction. It now saturates.
+- **QX277 reserved bytes are zeroed** instead of being sent as stack garbage.
+- **Varint decode is bounded** by the received body length.
+- **TX build failures are surfaced** rather than discarded.
+- `hamfly_write_attr_u8()` rejects `attr_id > 0x3FFF` (the two-byte varint path
+  cannot encode it) with `HAMFLY_ERR_ENCODE`.
+
 ## Contributing
 
 This API is designed for active development. Feel free to extend and modify as needed for your use case.

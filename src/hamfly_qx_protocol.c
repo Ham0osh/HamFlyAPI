@@ -23,6 +23,29 @@
  *
  * Edits:
  *  - Updated includes to consolidated files.
+ *
+ * v2 divergences from the Freefly original (2026-07-20). Each is marked in
+ * place with a "HAMFLY-DIVERGENCE (Fn)" comment; grep that tag to find them
+ * all. Rationale for every item: build/review/findings.md.
+ *  - F4  : parser state (rw/msgPtr/rw_orig) moved from file-scope globals into
+ *          a caller-supplied QX_ParserCtx_t, threaded as the first argument of
+ *          every QX_Parser_, Add and Get function, and every ADD and GET
+ *          macro.
+ *          Makes the parser reentrant. NO wire-format change -- arithmetic,
+ *          branches and byte order are identical to the original.
+ *  - F5  : TX extended-length threshold corrected 100 -> 127 (a single QX
+ *          length byte legally carries up to 127).
+ *  - F7  : QX_GetExtdValFromBuf() gained an `end` bound so a malformed varint
+ *          cannot read past the received body.
+ *  - F8  : QX_TxMsg_Setup() status is now checked in the four
+ *          QX_SendPacket_Cli_* senders instead of being discarded.
+ *  - F11 : NULL-guard on QX_Servers[].Parser_CB in QX_Srv_Rx_Read/Write.
+ *          QX_InitSrv() is never called, so the array is BSS-zero and any
+ *          broadcast-addressed frame would dispatch through a NULL pointer.
+ *
+ * NOT build-verified -- no C compiler was available when these were written.
+ * Requires a PSoC Creator 4.4 build and the QX277/QX287 wire-capture
+ * regression in build/review/f4-parser-context.md section 5 before use.
  */
 
 #include "hamfly_qx_protocol.h"
@@ -41,10 +64,9 @@ QX_CommsPort_t QX_CommsPorts[QX_NUM_OF_PORTS];
 void (*QX_BuildHeader_Legacy)(QX_Msg_t *Msg_p) = NULL;
 void (*QX_ParseHeader_Legacy)(QX_Msg_t *Msg_p) = NULL;
 
-/* QX_Parsing_Functions globals */
-volatile uint8_t *msgPtr;
-QB_Parser_Dir_e   rw;
-static QB_Parser_Dir_e rw_orig;
+/* QX_Parsing_Functions state now lives in a per-message QX_ParserCtx_t
+ * (see hamfly_qx_protocol.h) passed explicitly to every function below,
+ * instead of file-scope globals (F4). */
 
 /* ============================================================
  * Private prototypes
@@ -59,7 +81,7 @@ static void      QX_Cli_Rx_CurVal    (QX_Msg_t *RxMsg_p);
 static void      QX_BuildHeader      (QX_Msg_t *Msg_p);
 static void      QX_ParseHeader      (QX_Msg_t *Msg_p);
 static void      QX_AddExtdValToBuf  (uint8_t **p, uint32_t Val);
-static uint32_t  QX_GetExtdValFromBuf(uint8_t **p);
+static uint32_t  QX_GetExtdValFromBuf(uint8_t **p, const uint8_t *end);
 static uint8_t   QX_Calc8bChecksum   (uint8_t *buf_p, uint32_t len);
 static uint32_t  QX_compute_crc32    (uint8_t data);
 
@@ -75,208 +97,208 @@ static uint32_t  QX_compute_crc32    (uint8_t data);
 #define BITFIELD_MASK_7  0x7F
 #define BITFIELD_MASK_8  0xFF
 
-#define ADDSL(v)   { *msgPtr++ = (uint8_t)((v) >> 24); *msgPtr++ = (uint8_t)((v) >> 16); *msgPtr++ = (uint8_t)((v) >> 8); *msgPtr++ = (uint8_t)(v); }
-#define ADDSS(v)   { *msgPtr++ = (uint8_t)((v) >> 8); *msgPtr++ = (uint8_t)(v); }
-#define ADDUS(v)   { *msgPtr++ = (uint8_t)((v) >> 8); *msgPtr++ = (uint8_t)(v); }
-#define ADDCHAR(v) { *msgPtr++ = (uint8_t)(v); }
+#define ADDSL(ctx,v)   { *(ctx)->msgPtr++ = (uint8_t)((v) >> 24); *(ctx)->msgPtr++ = (uint8_t)((v) >> 16); *(ctx)->msgPtr++ = (uint8_t)((v) >> 8); *(ctx)->msgPtr++ = (uint8_t)(v); }
+#define ADDSS(ctx,v)   { *(ctx)->msgPtr++ = (uint8_t)((v) >> 8); *(ctx)->msgPtr++ = (uint8_t)(v); }
+#define ADDUS(ctx,v)   { *(ctx)->msgPtr++ = (uint8_t)((v) >> 8); *(ctx)->msgPtr++ = (uint8_t)(v); }
+#define ADDCHAR(ctx,v) { *(ctx)->msgPtr++ = (uint8_t)(v); }
 
-#define GETUC  ((uint8_t)*msgPtr++)
-#define GETSC  ((int8_t)*msgPtr++)
-#define GETSS  ((int16_t)((*msgPtr) << 8) | (int16_t)((*(msgPtr + 1)))); msgPtr += 2;
-#define GETUS  ((uint16_t)((*msgPtr) << 8) | (uint16_t)((*(msgPtr + 1)))); msgPtr += 2;
-#define GETSL  ((int32_t)((*msgPtr) << 24) | (int32_t)((*(msgPtr+1)) << 16) | (int32_t)((*(msgPtr+2)) << 8) | (int32_t)(*(msgPtr+3))); msgPtr += 4;
+#define GETUC(ctx)  ((uint8_t)*(ctx)->msgPtr++)
+#define GETSC(ctx)  ((int8_t)*(ctx)->msgPtr++)
+#define GETSS(ctx)  ((int16_t)((*(ctx)->msgPtr) << 8) | (int16_t)((*((ctx)->msgPtr + 1)))); (ctx)->msgPtr += 2;
+#define GETUS(ctx)  ((uint16_t)((*(ctx)->msgPtr) << 8) | (uint16_t)((*((ctx)->msgPtr + 1)))); (ctx)->msgPtr += 2;
+#define GETSL(ctx)  ((int32_t)((*(ctx)->msgPtr) << 24) | (int32_t)((*((ctx)->msgPtr+1)) << 16) | (int32_t)((*((ctx)->msgPtr+2)) << 8) | (int32_t)(*((ctx)->msgPtr+3))); (ctx)->msgPtr += 4;
 
 /* ============================================================
  * QX_Parsing_Functions implementations (verbatim)
  * ============================================================ */
 
-void QX_Parser_SetMsgPtr(uint8_t *p)         { msgPtr = p; }
-void QX_Parser_AdvMsgPtr(void)               { msgPtr++; }
-volatile uint8_t *QX_Parser_GetMsgPtr(void)  { return msgPtr; }
-void QX_Parser_SetDir_Read(void)             { rw = QB_Parser_Dir_Read; }
-void QX_Parser_SetDir_WriteRel(void)         { rw = QB_Parser_Dir_WriteDel; }
-void QX_Parser_SetDir_WriteAbs(void)         { rw = QB_Parser_Dir_WriteAbs; }
-QB_Parser_Dir_e QX_Parser_GetDir(void)       { return rw; }
+void QX_Parser_SetMsgPtr(QX_ParserCtx_t *ctx, uint8_t *p)         { ctx->msgPtr = p; }
+void QX_Parser_AdvMsgPtr(QX_ParserCtx_t *ctx)                     { ctx->msgPtr++; }
+volatile uint8_t *QX_Parser_GetMsgPtr(QX_ParserCtx_t *ctx)        { return ctx->msgPtr; }
+void QX_Parser_SetDir_Read(QX_ParserCtx_t *ctx)                   { ctx->rw = QB_Parser_Dir_Read; }
+void QX_Parser_SetDir_WriteRel(QX_ParserCtx_t *ctx)               { ctx->rw = QB_Parser_Dir_WriteDel; }
+void QX_Parser_SetDir_WriteAbs(QX_ParserCtx_t *ctx)               { ctx->rw = QB_Parser_Dir_WriteAbs; }
+QB_Parser_Dir_e QX_Parser_GetDir(QX_ParserCtx_t *ctx)             { return ctx->rw; }
 
-void QX_Parser_Dir_ForceWriteAbs_Set(void) {
-    rw_orig = rw;
-    if (rw == QB_Parser_Dir_WriteDel) rw = QB_Parser_Dir_WriteAbs;
+void QX_Parser_Dir_ForceWriteAbs_Set(QX_ParserCtx_t *ctx) {
+    ctx->rw_orig = ctx->rw;
+    if (ctx->rw == QB_Parser_Dir_WriteDel) ctx->rw = QB_Parser_Dir_WriteAbs;
 }
-void QX_Parser_Dir_ForceWriteAbs_Reset(void) { rw = rw_orig; }
+void QX_Parser_Dir_ForceWriteAbs_Reset(QX_ParserCtx_t *ctx) { ctx->rw = ctx->rw_orig; }
 
-void AddFloatAsSignedLong(float *v, uint32_t n, float scaleto) {
-    while (n--) { int32_t value = (int32_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDSL(value); v++; }
+void AddFloatAsSignedLong(QX_ParserCtx_t *ctx, float *v, uint32_t n, float scaleto) {
+    while (n--) { int32_t value = (int32_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDSL(ctx,value); v++; }
 }
-void AddFloatAsSignedShort(float *v, uint32_t n, float scaleto) {
-    while (n--) { int16_t value = (int16_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDSS(value); v++; }
+void AddFloatAsSignedShort(QX_ParserCtx_t *ctx, float *v, uint32_t n, float scaleto) {
+    while (n--) { int16_t value = (int16_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDSS(ctx,value); v++; }
 }
-void AddFloatAsSignedChar(float *v, uint32_t n, float scaleto) {
-    while (n--) { int8_t value = (int8_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDCHAR(value); v++; }
+void AddFloatAsSignedChar(QX_ParserCtx_t *ctx, float *v, uint32_t n, float scaleto) {
+    while (n--) { int8_t value = (int8_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDCHAR(ctx,value); v++; }
 }
-void AddFloatAsUnsignedChar(float *v, uint32_t n, float scaleto) {
-    while (n--) { uint8_t value = (uint8_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDCHAR(value); v++; }
+void AddFloatAsUnsignedChar(QX_ParserCtx_t *ctx, float *v, uint32_t n, float scaleto) {
+    while (n--) { uint8_t value = (uint8_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDCHAR(ctx,value); v++; }
 }
-void AddFloatAsUnsignedShort(float *v, uint32_t n, float scaleto) {
-    while (n--) { uint16_t value = (uint16_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDUS(value); v++; }
-}
-
-void GetFloatAsSignedLong(float *v, uint32_t n, float max, float min, float scalefrom) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { float r = (float)GETSL; r *= scalefrom; *v += r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    } else {
-        while (n--) { float r = (float)GETSL; r *= scalefrom; *v = r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    }
-}
-void GetFloatAsSignedShort(float *v, uint32_t n, float max, float min, float scalefrom) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { float r = (float)GETSS; r *= scalefrom; *v += r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    } else {
-        while (n--) { float r = (float)GETSS; r *= scalefrom; *v = r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    }
-}
-void GetFloatAsSignedChar(float *v, uint32_t n, float max, float min, float scalefrom) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { float r = (float)GETSC; r *= scalefrom; *v += r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    } else {
-        while (n--) { float r = (float)GETSC; r *= scalefrom; *v = r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    }
-}
-void GetFloatAsUnsignedChar(float *v, uint32_t n, float max, float min, float scalefrom) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { float r = (float)GETSC; r *= scalefrom; *v += r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    } else {
-        while (n--) { float r = (float)GETUC; r *= scalefrom; *v = r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    }
-}
-void GetFloatAsUnsignedShort(float *v, uint32_t n, float max, float min, float scalefrom) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { float r = (float)GETUS; r *= scalefrom; *v += r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    } else {
-        while (n--) { float r = (float)GETUS; r *= scalefrom; *v = r;
-            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
-    }
+void AddFloatAsUnsignedShort(QX_ParserCtx_t *ctx, float *v, uint32_t n, float scaleto) {
+    while (n--) { uint16_t value = (uint16_t)(((*v)*scaleto) + 0.5f*((0<*v)-(*v<0))); ADDUS(ctx,value); v++; }
 }
 
-void AddSignedLongAsSignedLong(int32_t *v, uint32_t n) {
-    while (n--) { int32_t val = *v; ADDSL(val); v++; }
-}
-void AddSignedLongAsSignedShort(int32_t *v, uint32_t n) {
-    while (n--) { int16_t val = (int16_t)*v; ADDSS(val); v++; }
-}
-void AddSignedLongAsSignedChar(int32_t *v, uint32_t n) {
-    while (n--) { int8_t val = (int8_t)*v; ADDCHAR(val); v++; }
-}
-void AddSignedLongAsUnsignedChar(int32_t *v, uint32_t n) {
-    while (n--) { uint8_t val = (uint8_t)*v; ADDCHAR(val); v++; }
-}
-void GetSignedLongAsSignedLong(int32_t *v, uint32_t n, int32_t max, int32_t min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int32_t r = GETSL; *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+void GetFloatAsSignedLong(QX_ParserCtx_t *ctx, float *v, uint32_t n, float max, float min, float scalefrom) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { float r = (float)GETSL(ctx); r *= scalefrom; *v += r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
     } else {
-        while (n--) { int32_t r = GETSL; *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+        while (n--) { float r = (float)GETSL(ctx); r *= scalefrom; *v = r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
     }
 }
-void GetSignedLongAsSignedShort(int32_t *v, uint32_t n, int32_t max, int32_t min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int32_t r = (int32_t)(int16_t)GETSS; *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+void GetFloatAsSignedShort(QX_ParserCtx_t *ctx, float *v, uint32_t n, float max, float min, float scalefrom) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { float r = (float)GETSS(ctx); r *= scalefrom; *v += r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
     } else {
-        while (n--) { int32_t r = (int32_t)(int16_t)GETSS; *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+        while (n--) { float r = (float)GETSS(ctx); r *= scalefrom; *v = r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
     }
 }
-void GetSignedLongAsSignedChar(int32_t *v, uint32_t n, int32_t max, int32_t min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int32_t r = (int32_t)GETSC; *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+void GetFloatAsSignedChar(QX_ParserCtx_t *ctx, float *v, uint32_t n, float max, float min, float scalefrom) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { float r = (float)GETSC(ctx); r *= scalefrom; *v += r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
     } else {
-        while (n--) { int32_t r = (int32_t)GETSC; *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+        while (n--) { float r = (float)GETSC(ctx); r *= scalefrom; *v = r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
     }
 }
-void GetSignedLongAsUnsignedChar(int32_t *v, uint32_t n, int32_t max, int32_t min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int32_t r = (int32_t)GETSC; *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+void GetFloatAsUnsignedChar(QX_ParserCtx_t *ctx, float *v, uint32_t n, float max, float min, float scalefrom) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { float r = (float)GETSC(ctx); r *= scalefrom; *v += r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
     } else {
-        while (n--) { int32_t r = (int32_t)GETUC; *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+        while (n--) { float r = (float)GETUC(ctx); r *= scalefrom; *v = r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
+    }
+}
+void GetFloatAsUnsignedShort(QX_ParserCtx_t *ctx, float *v, uint32_t n, float max, float min, float scalefrom) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { float r = (float)GETUS(ctx); r *= scalefrom; *v += r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
+    } else {
+        while (n--) { float r = (float)GETUS(ctx); r *= scalefrom; *v = r;
+            if (max<*v)*v=max; if (*v<min)*v=min; if (isnan(*v))*v=0.0f; v++; }
     }
 }
 
-void AddSignedShortAsSignedShort(int16_t *v, uint32_t n) {
-    while (n--) { int16_t val = *v; ADDSS(val); v++; }
+void AddSignedLongAsSignedLong(QX_ParserCtx_t *ctx, int32_t *v, uint32_t n) {
+    while (n--) { int32_t val = *v; ADDSL(ctx,val); v++; }
 }
-void AddSignedShortAsSignedChar(int16_t *v, uint32_t n) {
-    while (n--) { int8_t val = (int8_t)*v; ADDCHAR(val); v++; }
+void AddSignedLongAsSignedShort(QX_ParserCtx_t *ctx, int32_t *v, uint32_t n) {
+    while (n--) { int16_t val = (int16_t)*v; ADDSS(ctx,val); v++; }
 }
-void AddSignedShortAsUnsignedChar(int16_t *v, uint32_t n) {
-    while (n--) { uint8_t val = (uint8_t)*v; ADDCHAR(val); v++; }
+void AddSignedLongAsSignedChar(QX_ParserCtx_t *ctx, int32_t *v, uint32_t n) {
+    while (n--) { int8_t val = (int8_t)*v; ADDCHAR(ctx,val); v++; }
 }
-void GetSignedShortAsSignedShort(int16_t *v, uint32_t n, float max, float min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int16_t r = GETSS; *v += r; if (max<*v)*v=(int16_t)max; if (*v<min)*v=(int16_t)min; v++; }
+void AddSignedLongAsUnsignedChar(QX_ParserCtx_t *ctx, int32_t *v, uint32_t n) {
+    while (n--) { uint8_t val = (uint8_t)*v; ADDCHAR(ctx,val); v++; }
+}
+void GetSignedLongAsSignedLong(QX_ParserCtx_t *ctx, int32_t *v, uint32_t n, int32_t max, int32_t min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int32_t r = GETSL(ctx); *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     } else {
-        while (n--) { int16_t r = GETSS; *v  = r; if (max<*v)*v=(int16_t)max; if (*v<min)*v=(int16_t)min; v++; }
+        while (n--) { int32_t r = GETSL(ctx); *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     }
 }
-void GetSignedShortAsSignedChar(int16_t *v, uint32_t n, float max, float min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int16_t r = (int16_t)GETSC; *v += r; if (max<*v)*v=(int16_t)max; if (*v<min)*v=(int16_t)min; v++; }
+void GetSignedLongAsSignedShort(QX_ParserCtx_t *ctx, int32_t *v, uint32_t n, int32_t max, int32_t min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int32_t r = (int32_t)(int16_t)GETSS(ctx); *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     } else {
-        while (n--) { int16_t r = (int16_t)GETSC; *v  = r; if (max<*v)*v=(int16_t)max; if (*v<min)*v=(int16_t)min; v++; }
+        while (n--) { int32_t r = (int32_t)(int16_t)GETSS(ctx); *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     }
 }
-void GetSignedShortAsUnsignedChar(int16_t *v, uint32_t n, int16_t max, int16_t min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int16_t r = (int16_t)GETSC; *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+void GetSignedLongAsSignedChar(QX_ParserCtx_t *ctx, int32_t *v, uint32_t n, int32_t max, int32_t min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int32_t r = (int32_t)GETSC(ctx); *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     } else {
-        while (n--) { int16_t r = (int16_t)GETUC; *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+        while (n--) { int32_t r = (int32_t)GETSC(ctx); *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+    }
+}
+void GetSignedLongAsUnsignedChar(QX_ParserCtx_t *ctx, int32_t *v, uint32_t n, int32_t max, int32_t min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int32_t r = (int32_t)GETSC(ctx); *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+    } else {
+        while (n--) { int32_t r = (int32_t)GETUC(ctx); *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     }
 }
 
-void AddSignedCharAsSignedChar(int8_t *v, uint32_t n) {
-    while (n--) { ADDCHAR(*v); v++; }
+void AddSignedShortAsSignedShort(QX_ParserCtx_t *ctx, int16_t *v, uint32_t n) {
+    while (n--) { int16_t val = *v; ADDSS(ctx,val); v++; }
 }
-void GetSignedCharAsSignedChar(int8_t *v, uint32_t n, int8_t max, int8_t min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int8_t r = GETSC; int32_t t = *v; t += r;
+void AddSignedShortAsSignedChar(QX_ParserCtx_t *ctx, int16_t *v, uint32_t n) {
+    while (n--) { int8_t val = (int8_t)*v; ADDCHAR(ctx,val); v++; }
+}
+void AddSignedShortAsUnsignedChar(QX_ParserCtx_t *ctx, int16_t *v, uint32_t n) {
+    while (n--) { uint8_t val = (uint8_t)*v; ADDCHAR(ctx,val); v++; }
+}
+void GetSignedShortAsSignedShort(QX_ParserCtx_t *ctx, int16_t *v, uint32_t n, float max, float min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int16_t r = GETSS(ctx); *v += r; if (max<*v)*v=(int16_t)max; if (*v<min)*v=(int16_t)min; v++; }
+    } else {
+        while (n--) { int16_t r = GETSS(ctx); *v  = r; if (max<*v)*v=(int16_t)max; if (*v<min)*v=(int16_t)min; v++; }
+    }
+}
+void GetSignedShortAsSignedChar(QX_ParserCtx_t *ctx, int16_t *v, uint32_t n, float max, float min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int16_t r = (int16_t)GETSC(ctx); *v += r; if (max<*v)*v=(int16_t)max; if (*v<min)*v=(int16_t)min; v++; }
+    } else {
+        while (n--) { int16_t r = (int16_t)GETSC(ctx); *v  = r; if (max<*v)*v=(int16_t)max; if (*v<min)*v=(int16_t)min; v++; }
+    }
+}
+void GetSignedShortAsUnsignedChar(QX_ParserCtx_t *ctx, int16_t *v, uint32_t n, int16_t max, int16_t min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int16_t r = (int16_t)GETSC(ctx); *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+    } else {
+        while (n--) { int16_t r = (int16_t)GETUC(ctx); *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+    }
+}
+
+void AddSignedCharAsSignedChar(QX_ParserCtx_t *ctx, int8_t *v, uint32_t n) {
+    while (n--) { ADDCHAR(ctx,*v); v++; }
+}
+void GetSignedCharAsSignedChar(QX_ParserCtx_t *ctx, int8_t *v, uint32_t n, int8_t max, int8_t min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int8_t r = GETSC(ctx); int32_t t = *v; t += r;
             if (max<t) t=max; if (t<min) t=min; *v = (int8_t)t; v++; }
     } else {
-        while (n--) { int8_t r = GETSC; *v = r;
+        while (n--) { int8_t r = GETSC(ctx); *v = r;
             if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     }
 }
 
-void AddUnsignedCharAsUnsignedChar(uint8_t *v, uint32_t n) {
-    while (n--) { ADDCHAR(*v); v++; }
+void AddUnsignedCharAsUnsignedChar(QX_ParserCtx_t *ctx, uint8_t *v, uint32_t n) {
+    while (n--) { ADDCHAR(ctx,*v); v++; }
 }
-void GetUnsignedCharAsUnsignedChar(uint8_t *v, uint32_t n, uint8_t max, uint8_t min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { int8_t r = GETSC; int32_t t = *v; t += r;
+void GetUnsignedCharAsUnsignedChar(QX_ParserCtx_t *ctx, uint8_t *v, uint32_t n, uint8_t max, uint8_t min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { int8_t r = GETSC(ctx); int32_t t = *v; t += r;
             if (max<t) t=max; if (t<min) t=min; *v = (uint8_t)t; v++; }
     } else {
-        while (n--) { uint8_t r = GETUC; *v = r;
+        while (n--) { uint8_t r = GETUC(ctx); *v = r;
             if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     }
 }
 
-void AddUnsignedShortAsUnsignedShort(uint16_t *v, uint32_t n) {
-    while (n--) { ADDUS(*v); v++; }
+void AddUnsignedShortAsUnsignedShort(QX_ParserCtx_t *ctx, uint16_t *v, uint32_t n) {
+    while (n--) { ADDUS(ctx,*v); v++; }
 }
-void GetUnsignedShortAsUnsignedShort(uint16_t *v, uint32_t n, uint16_t max, uint16_t min) {
-    if (rw == QB_Parser_Dir_WriteDel) {
-        while (n--) { uint16_t r = GETUS; *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+void GetUnsignedShortAsUnsignedShort(QX_ParserCtx_t *ctx, uint16_t *v, uint32_t n, uint16_t max, uint16_t min) {
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        while (n--) { uint16_t r = GETUS(ctx); *v += r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     } else {
-        while (n--) { uint16_t r = GETUS; *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
+        while (n--) { uint16_t r = GETUS(ctx); *v  = r; if (max<*v)*v=max; if (*v<min)*v=min; v++; }
     }
 }
 
-void AddBitsAsByte(uint8_t *v, uint8_t start_bit, uint8_t n_bits) {
-    uint8_t temp = *msgPtr, mask = 0;
+void AddBitsAsByte(QX_ParserCtx_t *ctx, uint8_t *v, uint8_t start_bit, uint8_t n_bits) {
+    uint8_t temp = *ctx->msgPtr, mask = 0;
     switch (n_bits) {
         case 1: mask=BITFIELD_MASK_1; break; case 2: mask=BITFIELD_MASK_2; break;
         case 3: mask=BITFIELD_MASK_3; break; case 4: mask=BITFIELD_MASK_4; break;
@@ -286,10 +308,10 @@ void AddBitsAsByte(uint8_t *v, uint8_t start_bit, uint8_t n_bits) {
     }
     temp &= ~(mask << start_bit);
     temp |= ((*v & mask) << start_bit);
-    *msgPtr = temp;
+    *ctx->msgPtr = temp;
 }
 
-void GetBitsAsByte(uint8_t *v, uint8_t start_bit, uint8_t n_bits) {
+void GetBitsAsByte(QX_ParserCtx_t *ctx, uint8_t *v, uint8_t start_bit, uint8_t n_bits) {
     uint8_t mask = 0;
     switch (n_bits) {
         case 1: mask=BITFIELD_MASK_1; break; case 2: mask=BITFIELD_MASK_2; break;
@@ -298,11 +320,11 @@ void GetBitsAsByte(uint8_t *v, uint8_t start_bit, uint8_t n_bits) {
         case 7: mask=BITFIELD_MASK_7; break; case 8: mask=BITFIELD_MASK_8; break;
         default: break;
     }
-    if (rw == QB_Parser_Dir_WriteDel) {
-        uint8_t xor_mask = (*msgPtr >> start_bit) & mask;
+    if (ctx->rw == QB_Parser_Dir_WriteDel) {
+        uint8_t xor_mask = (*ctx->msgPtr >> start_bit) & mask;
         *v ^= xor_mask;
     } else {
-        *v = (*msgPtr >> start_bit) & mask;
+        *v = (*ctx->msgPtr >> start_bit) & mask;
     }
 }
 
@@ -360,6 +382,18 @@ static void QX_Srv_Rx_Read(QX_Msg_t *RxMsg_p)
     for (srv_i = 0; srv_i < QX_NUM_SRV; srv_i++) {
         if ((RxMsg_p->Header.Target_Addr == QX_Servers[srv_i].Address) ||
             (RxMsg_p->Header.Target_Addr == QX_DEV_ID_BROADCAST)) {
+            /* HAMFLY-DIVERGENCE (F11) — not in the Freefly reference.
+             * QX_InitSrv() is never called in this codebase, so QX_Servers[]
+             * is BSS-zero: Parser_CB == NULL and Address == 0. Since
+             * QX_DEV_ID_BROADCAST is also 0, the match condition above is
+             * satisfied by any broadcast-addressed frame, and the callback
+             * dispatched below (via QX_SendPacket_Srv_CurVal ->
+             * Srv_p->Parser_CB) would be a NULL call -> hard fault, remotely
+             * triggerable from untrusted UART input. Skip unregistered
+             * servers. Remove this guard only if QX_InitSrv() is actually
+             * called during init. */
+            if (QX_Servers[srv_i].Parser_CB == NULL) continue;
+
             QX_TxMsgOptions_t options;
             QX_InitTxOptions(&options);
             options.use_CRC32           = RxMsg_p->Header.AddCRC32;
@@ -382,6 +416,12 @@ static void QX_Srv_Rx_Write(QX_Msg_t *RxMsg_p)
     for (srv_i = 0; srv_i < QX_NUM_SRV; srv_i++) {
         if ((RxMsg_p->Header.Target_Addr == QX_Servers[srv_i].Address) ||
             (RxMsg_p->Header.Target_Addr == QX_DEV_ID_BROADCAST)) {
+            /* HAMFLY-DIVERGENCE (F11) — not in the Freefly reference.
+             * See the matching guard in QX_Srv_Rx_Read(). QX_Servers[] is
+             * never initialised, so this dispatch is a NULL call for any
+             * broadcast-addressed WRITE frame. */
+            if (QX_Servers[srv_i].Parser_CB == NULL) continue;
+
             QX_Servers[srv_i].Parser_CB(RxMsg_p);
             if (RxMsg_p->DisableStdResponse == 0) {
                 QX_TxMsgOptions_t options;
@@ -426,7 +466,13 @@ static QX_Stat_e QX_TxMsg_Finish(QX_Msg_t *TxMsg_p)
 
     TxMsg_p->Header.MsgLength = (uint16_t)(TxMsg_p->MsgBuf_p - TxMsg_p->MsgBufAtt_p);
 
-    if (TxMsg_p->Legacy_Header || (TxMsg_p->Header.MsgLength > 100)) {
+    /* HAMFLY-DIVERGENCE (F5) — Freefly original used `> 100`.
+     * A QX body carried with a single length byte can be up to 127 (7 bits);
+     * only above that must we emit the 2-byte extended-length form. Dormant
+     * at current payload sizes (attr 277 body is ~23 B) but a correctness
+     * trap for any future larger attribute write. RX already decodes both
+     * forms, so this only affects what this node transmits. */
+    if (TxMsg_p->Legacy_Header || (TxMsg_p->Header.MsgLength > 127)) {
         TxMsg_p->MsgBufStart_p = &TxMsg_p->MsgBuf[0];
         QX_use2ByteLen = 1;
     } else {
@@ -522,7 +568,11 @@ static void QX_ParseHeader(QX_Msg_t *Msg_p)
     volatile uint8_t OptionByte;
     Msg_p->MsgBuf_p = Msg_p->MsgBufAtt_p;
 
-    Msg_p->Header.Attrib = QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p);
+    /* One past the last body byte; every varint decode below is bounded by
+     * this so a malformed frame cannot read beyond the received body. */
+    const uint8_t *body_end = Msg_p->MsgBufAtt_p + Msg_p->Header.MsgLength;
+
+    Msg_p->Header.Attrib = QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p, body_end);
 
     OptionByte = *Msg_p->MsgBuf_p++;
     Msg_p->Header.Type               = (QX_Msg_Type_e)(OptionByte & 0xF);
@@ -537,13 +587,13 @@ static void QX_ParseHeader(QX_Msg_t *Msg_p)
     }
 
     if (Msg_p->Header.Remove_Addr_Fields == 0) {
-        Msg_p->Header.Source_Addr = (QX_DevId_e)(QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p));
-        Msg_p->Header.Target_Addr = (QX_DevId_e)(QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p));
+        Msg_p->Header.Source_Addr = (QX_DevId_e)(QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p, body_end));
+        Msg_p->Header.Target_Addr = (QX_DevId_e)(QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p, body_end));
     }
 
     if (Msg_p->Header.Remove_Req_Fields == 0) {
-        Msg_p->Header.TransReq_Addr = (QX_DevId_e)(QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p));
-        Msg_p->Header.RespReq_Addr  = (QX_DevId_e)(QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p));
+        Msg_p->Header.TransReq_Addr = (QX_DevId_e)(QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p, body_end));
+        Msg_p->Header.RespReq_Addr  = (QX_DevId_e)(QX_GetExtdValFromBuf(&Msg_p->MsgBuf_p, body_end));
     }
 
     if (Msg_p->Header.FF_Ext) Msg_p->MsgBuf_p += 2;
@@ -568,11 +618,19 @@ static void QX_AddExtdValToBuf(uint8_t **p, uint32_t Val)
     }
 }
 
-static uint32_t QX_GetExtdValFromBuf(uint8_t **p)
+/* HAMFLY-DIVERGENCE (F7) — Freefly original took only `uint8_t **p` and had
+ * no end bound.
+ * Decode a varint, bounded by `end` (one past the last readable byte).
+ * Without the bound a crafted value with continuation bits set walks up to
+ * 4 bytes past the intended field, silently consuming following header bytes
+ * and misaligning the rest of the parse. Stopping at `end` contains that;
+ * a malformed frame still fails the checksum and is discarded. */
+static uint32_t QX_GetExtdValFromBuf(uint8_t **p, const uint8_t *end)
 {
     uint32_t Val = 0;
     int n;
     for (n = 0; n < 4; n++) {
+        if (*p >= end) break;   /* unterminated varint — stop at buffer end */
         Val = (((uint32_t)(**p & 0x7F)) << (7*n)) | Val;
         if (**p & 0x80) (*p)++;
         else            { (*p)++; break; }
@@ -649,7 +707,10 @@ QX_Stat_e QX_SendPacket_Srv_CurVal(QX_Server_t *Srv_p, uint32_t Attrib,
     TxMsg.Header.Source_Addr    = Srv_p->Address;
     TxMsg.Header.FF_Ext         = options.FF_Ext;
     TxMsg.Header.AddCRC32       = options.use_CRC32;
-    QX_TxMsg_Setup(&TxMsg);
+    /* HAMFLY-DIVERGENCE (F8) — Freefly original discarded this return value.
+     * Surface build failures instead of proceeding with a half-built msg. */
+    { QX_Stat_e setup_stat = QX_TxMsg_Setup(&TxMsg);
+      if (setup_stat != QX_STAT_OK) return setup_stat; }
     TxMsg.Parse_Type = QX_PARSE_TYPE_CURVAL_SEND;
     TxMsg.MsgBuf_p   = Srv_p->Parser_CB(&TxMsg);
     return QX_TxMsg_Finish(&TxMsg);
@@ -668,7 +729,10 @@ QX_Stat_e QX_SendPacket_Cli_Read(QX_Client_t *Cli_p, uint32_t Attrib,
     TxMsg.Header.Source_Addr   = Cli_p->Address;
     TxMsg.Header.FF_Ext        = options.FF_Ext;
     TxMsg.Header.AddCRC32      = options.use_CRC32;
-    QX_TxMsg_Setup(&TxMsg);
+    /* HAMFLY-DIVERGENCE (F8) — Freefly original discarded this return value.
+     * Surface build failures instead of proceeding with a half-built msg. */
+    { QX_Stat_e setup_stat = QX_TxMsg_Setup(&TxMsg);
+      if (setup_stat != QX_STAT_OK) return setup_stat; }
     return QX_TxMsg_Finish(&TxMsg);
 }
 
@@ -685,7 +749,10 @@ QX_Stat_e QX_SendPacket_Cli_WriteABS(QX_Client_t *Cli_p, uint32_t Attrib,
     TxMsg.Header.Source_Addr   = Cli_p->Address;
     TxMsg.Header.FF_Ext        = options.FF_Ext;
     TxMsg.Header.AddCRC32      = options.use_CRC32;
-    QX_TxMsg_Setup(&TxMsg);
+    /* HAMFLY-DIVERGENCE (F8) — Freefly original discarded this return value.
+     * Surface build failures instead of proceeding with a half-built msg. */
+    { QX_Stat_e setup_stat = QX_TxMsg_Setup(&TxMsg);
+      if (setup_stat != QX_STAT_OK) return setup_stat; }
     TxMsg.Parse_Type = QX_PARSE_TYPE_WRITE_ABS_SEND;
     TxMsg.MsgBuf_p   = Cli_p->Parser_CB(&TxMsg);
     return QX_TxMsg_Finish(&TxMsg);
@@ -704,7 +771,10 @@ QX_Stat_e QX_SendPacket_Cli_WriteREL(QX_Client_t *Cli_p, uint32_t Attrib,
     TxMsg.Header.Source_Addr   = Cli_p->Address;
     TxMsg.Header.FF_Ext        = options.FF_Ext;
     TxMsg.Header.AddCRC32      = options.use_CRC32;
-    QX_TxMsg_Setup(&TxMsg);
+    /* HAMFLY-DIVERGENCE (F8) — Freefly original discarded this return value.
+     * Surface build failures instead of proceeding with a half-built msg. */
+    { QX_Stat_e setup_stat = QX_TxMsg_Setup(&TxMsg);
+      if (setup_stat != QX_STAT_OK) return setup_stat; }
     TxMsg.Parse_Type = QX_PARSE_TYPE_WRITE_REL_SEND;
     TxMsg.MsgBuf_p   = Cli_p->Parser_CB(&TxMsg);
     return QX_TxMsg_Finish(&TxMsg);

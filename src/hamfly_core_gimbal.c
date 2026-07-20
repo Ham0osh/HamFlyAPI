@@ -34,21 +34,36 @@
 // Internal helpers: load/save between hamfly_control_t and FreeflyAPI.control
 // ============================================================================
 
+// Clamp a normalized control input to the ±1.0 domain the QX wire format
+// expects. AddFloatAsSignedShort() applies no clamp of its own, so |v| > 1.0
+// overflows the int16 and wraps: 1.5f becomes -16386, i.e. near-full-scale in
+// the OPPOSITE direction. Saturating turns a dangerous reversal into a benign
+// full-scale command. Enforced here in the wrapper layer so the QX protocol
+// core stays byte-faithful to the Freefly reference.
+static float hamfly_clamp_unit(float v)
+{
+    if (v >  1.0f) return  1.0f;
+    if (v < -1.0f) return -1.0f;
+    return v;
+}
+
 // Convert a normalized control float to the exact int16 word placed on the QX
-// wire. Mirrors AddFloatAsSignedShort() in hamfly_qx_protocol.c bit-for-bit
-// (scale 32767, round-half-away-from-zero, plain cast — no clamp), so the value
-// returned here is the number the gimbal actually receives, not a re-scale.
+// wire. Mirrors AddFloatAsSignedShort() in hamfly_qx_protocol.c (scale 32767,
+// round-half-away-from-zero, plain cast) and applies the same ±1.0 clamp that
+// load_freefly_control() applies on the send path, so the value returned here
+// is the number the gimbal actually receives, not a re-scale.
 static int16_t hamfly_float_to_wire_ss(float v)
 {
+    v = hamfly_clamp_unit(v);
     return (int16_t)((v * 32767.0f) + 0.5f * ((0.0f < v) - (v < 0.0f)));
 }
 
 // Copy the control struct into the existing FreeflyAPI.control struct for Tx.
 static void load_freefly_control(const hamfly_control_t *ctl)
 {
-    FreeflyAPI.control.pan.value   = ctl->pan;
-    FreeflyAPI.control.tilt.value  = ctl->tilt;
-    FreeflyAPI.control.roll.value  = ctl->roll;
+    FreeflyAPI.control.pan.value   = hamfly_clamp_unit(ctl->pan);
+    FreeflyAPI.control.tilt.value  = hamfly_clamp_unit(ctl->tilt);
+    FreeflyAPI.control.roll.value  = hamfly_clamp_unit(ctl->roll);
     FreeflyAPI.control.pan.type    = (ff_api_control_type_e)ctl->pan_mode;
     FreeflyAPI.control.tilt.type   = (ff_api_control_type_e)ctl->tilt_mode;
     FreeflyAPI.control.roll.type   = (ff_api_control_type_e)ctl->roll_mode;
@@ -240,6 +255,14 @@ hamfly_result_t hamfly_send_control(hamfly_gimbal_t *g,
                                      const hamfly_control_t *ctl)
 {
     if (!g || !g->hal.uart_putc) return HAMFLY_ERR_UART;
+    if (!ctl) return HAMFLY_ERR_ENCODE;
+
+    /* v2 BREAKING CHANGE: `enable` is now honoured as a send-gate. In v1 the
+     * field was documented as an explicit opt-in but never read, so a caller
+     * that left enable=0 still commanded the gimbal. Integrators migrating
+     * from v1 must set enable=1. See README "Migrating from v1". */
+    if (!ctl->enable) return HAMFLY_ERR_BAD_STATE;
+
     // Load control frame from gimbal struct
     load_freefly_control(ctl);
     g->ctl = *ctl;
@@ -261,6 +284,12 @@ void hamfly_kill(hamfly_gimbal_t *g)
     // Enable kill flag and send.
     hamfly_control_t k = g->ctl;
     k.kill = 1u;
+    /* Kill is an explicit operator safety action, so it must bypass the
+     * `enable` send-gate: g->ctl carries the LAST sent control, which on a
+     * fresh gimbal (or an app that never opted in) has enable=0 and would
+     * otherwise cause the stop command to be silently dropped. The gate
+     * exists to prevent accidental motion, never to block a stop. */
+    k.enable = 1u;
     (void)hamfly_send_control(g, &k);
 }
 
@@ -364,6 +393,12 @@ hamfly_result_t hamfly_write_attr_u8(hamfly_gimbal_t *g,
                                       uint8_t  value)
 {
     if (!g || !g->hal.uart_putc) return HAMFLY_ERR_UART;
+
+    /* The two-byte varint path below emits exactly two bytes and a fixed body
+     * length of 0x08, so it is only correct for IDs that fit in 14 bits. An
+     * attr_id > 0x3FFF needs three varint bytes; (uint8_t)(attr_id >> 7) would
+     * drop the high bits and the declared length would be wrong. */
+    if (attr_id > 0x3FFFu) return HAMFLY_ERR_ENCODE;
 
     uint8_t pkt[13];
     uint8_t idx = 0u, i;

@@ -38,7 +38,11 @@ static void _hamfly_psoc5_putc(void *ctx, uint8_t b)
 // User can adjust naming as needed.
 static inline hamfly_hal_t hamfly_psoc5_hal(void *ctx)
 {
-    hamfly_hal_t h;
+    // Zero-initialise every field. QX_GetTicks_ms() treats a non-NULL
+    // get_tick_ms as callable, so leaving it indeterminate would defeat that
+    // NULL guard and call through a garbage pointer on the first valid RX
+    // frame. Any HAL constructor that omits a field must zero it.
+    hamfly_hal_t h = {0};
     h.ctx       = ctx;
     h.uart_putc = _hamfly_psoc5_putc;
     return h;

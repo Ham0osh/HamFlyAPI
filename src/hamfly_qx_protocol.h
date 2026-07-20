@@ -23,6 +23,17 @@
  *
  * Edits:
  *  - Updated includes to consolidated files.
+ *
+ * v2 divergences from the Freefly original (2026-07-20):
+ *  - F4 : added QX_ParserCtx_t (per-message parser state) and removed the
+ *         `extern QB_Parser_Dir_e rw;` global. Every QX_Parser_* prototype,
+ *         every Add and Get prototype and all 14 PARSE_x_AS_x macros gained a
+ *         leading QX_ParserCtx_t* parameter. Macro NAMES are unchanged; only
+ *         their arity grew, so a missed call site is a compile error rather
+ *         than a silent bug. The public Parser_CB function-pointer type is
+ *         deliberately UNCHANGED -- the context never crosses that boundary.
+ *
+ * Rationale: build/review/findings.md. NOT build-verified.
  */
 
 #ifndef HAMFLY_QX_PROTOCOL_H
@@ -199,94 +210,107 @@ typedef enum {
     QB_Parser_Dir_WriteAbs
 } QB_Parser_Dir_e;
 
-extern QB_Parser_Dir_e rw;
+/* Per-message parser context. Replaces the old file-scope rw/msgPtr/rw_orig
+ * globals (F4). One instance is stack-allocated by whichever function drives
+ * a single QX message through the Add and Get primitives below -- currently
+ * only QX_ParsePacket_Cli_MoVI_Ctrl_CB in hamfly_qx_app.c. Zero-init is a
+ * valid starting state (rw == QB_Parser_Dir_Read). Never share one instance
+ * across two in-flight messages / call stacks. */
+typedef struct {
+    volatile uint8_t *msgPtr;
+    QB_Parser_Dir_e   rw;
+    QB_Parser_Dir_e   rw_orig;
+} QX_ParserCtx_t;
 
-void QX_Parser_SetMsgPtr           (uint8_t *p);
-void QX_Parser_AdvMsgPtr           (void);
-volatile uint8_t *QX_Parser_GetMsgPtr(void);
-void QX_Parser_SetDir_Read         (void);
-void QX_Parser_SetDir_WriteRel     (void);
-void QX_Parser_SetDir_WriteAbs     (void);
-QB_Parser_Dir_e QX_Parser_GetDir   (void);
-void QX_Parser_Dir_ForceWriteAbs_Set  (void);
-void QX_Parser_Dir_ForceWriteAbs_Reset(void);
+void QX_Parser_SetMsgPtr           (QX_ParserCtx_t *ctx, uint8_t *p);
+void QX_Parser_AdvMsgPtr           (QX_ParserCtx_t *ctx);
+volatile uint8_t *QX_Parser_GetMsgPtr(QX_ParserCtx_t *ctx);
+void QX_Parser_SetDir_Read         (QX_ParserCtx_t *ctx);
+void QX_Parser_SetDir_WriteRel     (QX_ParserCtx_t *ctx);
+void QX_Parser_SetDir_WriteAbs     (QX_ParserCtx_t *ctx);
+QB_Parser_Dir_e QX_Parser_GetDir   (QX_ParserCtx_t *ctx);
+void QX_Parser_Dir_ForceWriteAbs_Set  (QX_ParserCtx_t *ctx);
+void QX_Parser_Dir_ForceWriteAbs_Reset(QX_ParserCtx_t *ctx);
 
 /* Float parsers */
-void AddFloatAsSignedLong    (float *, uint32_t, float);
-void AddFloatAsSignedShort   (float *, uint32_t, float);
-void AddFloatAsSignedChar    (float *, uint32_t, float);
-void AddFloatAsUnsignedChar  (float *, uint32_t, float);
-void AddFloatAsUnsignedShort (float *, uint32_t, float);
-void GetFloatAsSignedLong    (float *, uint32_t, float, float, float);
-void GetFloatAsSignedShort   (float *, uint32_t, float, float, float);
-void GetFloatAsSignedChar    (float *, uint32_t, float, float, float);
-void GetFloatAsUnsignedChar  (float *, uint32_t, float, float, float);
-void GetFloatAsUnsignedShort (float *, uint32_t, float, float, float);
+void AddFloatAsSignedLong    (QX_ParserCtx_t *, float *, uint32_t, float);
+void AddFloatAsSignedShort   (QX_ParserCtx_t *, float *, uint32_t, float);
+void AddFloatAsSignedChar    (QX_ParserCtx_t *, float *, uint32_t, float);
+void AddFloatAsUnsignedChar  (QX_ParserCtx_t *, float *, uint32_t, float);
+void AddFloatAsUnsignedShort (QX_ParserCtx_t *, float *, uint32_t, float);
+void GetFloatAsSignedLong    (QX_ParserCtx_t *, float *, uint32_t, float, float, float);
+void GetFloatAsSignedShort   (QX_ParserCtx_t *, float *, uint32_t, float, float, float);
+void GetFloatAsSignedChar    (QX_ParserCtx_t *, float *, uint32_t, float, float, float);
+void GetFloatAsUnsignedChar  (QX_ParserCtx_t *, float *, uint32_t, float, float, float);
+void GetFloatAsUnsignedShort (QX_ParserCtx_t *, float *, uint32_t, float, float, float);
 
 /* Signed long parsers */
-void AddSignedLongAsSignedLong  (int32_t *, uint32_t);
-void AddSignedLongAsSignedShort (int32_t *, uint32_t);
-void AddSignedLongAsSignedChar  (int32_t *, uint32_t);
-void AddSignedLongAsUnsignedChar(int32_t *, uint32_t);
-void GetSignedLongAsSignedLong  (int32_t *, uint32_t, int32_t, int32_t);
-void GetSignedLongAsSignedShort (int32_t *, uint32_t, int32_t, int32_t);
-void GetSignedLongAsSignedChar  (int32_t *, uint32_t, int32_t, int32_t);
-void GetSignedLongAsUnsignedChar(int32_t *, uint32_t, int32_t, int32_t);
+void AddSignedLongAsSignedLong  (QX_ParserCtx_t *, int32_t *, uint32_t);
+void AddSignedLongAsSignedShort (QX_ParserCtx_t *, int32_t *, uint32_t);
+void AddSignedLongAsSignedChar  (QX_ParserCtx_t *, int32_t *, uint32_t);
+void AddSignedLongAsUnsignedChar(QX_ParserCtx_t *, int32_t *, uint32_t);
+void GetSignedLongAsSignedLong  (QX_ParserCtx_t *, int32_t *, uint32_t, int32_t, int32_t);
+void GetSignedLongAsSignedShort (QX_ParserCtx_t *, int32_t *, uint32_t, int32_t, int32_t);
+void GetSignedLongAsSignedChar  (QX_ParserCtx_t *, int32_t *, uint32_t, int32_t, int32_t);
+void GetSignedLongAsUnsignedChar(QX_ParserCtx_t *, int32_t *, uint32_t, int32_t, int32_t);
 
 /* Signed short parsers */
-void AddSignedShortAsSignedShort (int16_t *, uint32_t);
-void AddSignedShortAsSignedChar  (int16_t *, uint32_t);
-void AddSignedShortAsUnsignedChar(int16_t *, uint32_t);
-void GetSignedShortAsSignedShort (int16_t *, uint32_t, float, float);
-void GetSignedShortAsSignedChar  (int16_t *, uint32_t, float, float);
-void GetSignedShortAsUnsignedChar(int16_t *, uint32_t, int16_t, int16_t);
+void AddSignedShortAsSignedShort (QX_ParserCtx_t *, int16_t *, uint32_t);
+void AddSignedShortAsSignedChar  (QX_ParserCtx_t *, int16_t *, uint32_t);
+void AddSignedShortAsUnsignedChar(QX_ParserCtx_t *, int16_t *, uint32_t);
+void GetSignedShortAsSignedShort (QX_ParserCtx_t *, int16_t *, uint32_t, float, float);
+void GetSignedShortAsSignedChar  (QX_ParserCtx_t *, int16_t *, uint32_t, float, float);
+void GetSignedShortAsUnsignedChar(QX_ParserCtx_t *, int16_t *, uint32_t, int16_t, int16_t);
 
 /* Signed/unsigned char parsers */
-void AddSignedCharAsSignedChar    (int8_t  *, uint32_t);
-void GetSignedCharAsSignedChar    (int8_t  *, uint32_t, int8_t,  int8_t);
-void AddUnsignedCharAsUnsignedChar(uint8_t *, uint32_t);
-void GetUnsignedCharAsUnsignedChar(uint8_t *, uint32_t, uint8_t, uint8_t);
+void AddSignedCharAsSignedChar    (QX_ParserCtx_t *, int8_t  *, uint32_t);
+void GetSignedCharAsSignedChar    (QX_ParserCtx_t *, int8_t  *, uint32_t, int8_t,  int8_t);
+void AddUnsignedCharAsUnsignedChar(QX_ParserCtx_t *, uint8_t *, uint32_t);
+void GetUnsignedCharAsUnsignedChar(QX_ParserCtx_t *, uint8_t *, uint32_t, uint8_t, uint8_t);
 
 /* Unsigned short parsers */
-void AddUnsignedShortAsUnsignedShort(uint16_t *, uint32_t);
-void GetUnsignedShortAsUnsignedShort(uint16_t *, uint32_t, uint16_t, uint16_t);
+void AddUnsignedShortAsUnsignedShort(QX_ParserCtx_t *, uint16_t *, uint32_t);
+void GetUnsignedShortAsUnsignedShort(QX_ParserCtx_t *, uint16_t *, uint32_t, uint16_t, uint16_t);
 
 /* Bit field parsers */
-void AddBitsAsByte(uint8_t *, uint8_t start_bit, uint8_t n_bits);
-void GetBitsAsByte(uint8_t *, uint8_t start_bit, uint8_t n_bits);
+void AddBitsAsByte(QX_ParserCtx_t *, uint8_t *, uint8_t start_bit, uint8_t n_bits);
+void GetBitsAsByte(QX_ParserCtx_t *, uint8_t *, uint8_t start_bit, uint8_t n_bits);
 
-/* Macros */
-#define PARSE_FL_AS_SL(v,n,mx,mn,sc) \
-    if(rw==QB_Parser_Dir_Read){AddFloatAsSignedLong(v,n,sc);}else{GetFloatAsSignedLong(v,n,mx,mn,1.0f/sc);}
-#define PARSE_FL_AS_SS(v,n,mx,mn,sc) \
-    if(rw==QB_Parser_Dir_Read){AddFloatAsSignedShort(v,n,sc);}else{GetFloatAsSignedShort(v,n,mx,mn,1.0f/sc);}
-#define PARSE_FL_AS_SC(v,n,mx,mn,sc) \
-    if(rw==QB_Parser_Dir_Read){AddFloatAsSignedChar(v,n,sc);}else{GetFloatAsSignedChar(v,n,mx,mn,1.0f/sc);}
-#define PARSE_FL_AS_UC(v,n,mx,mn,sc) \
-    if(rw==QB_Parser_Dir_Read){AddFloatAsUnsignedChar(v,n,sc);}else{GetFloatAsUnsignedChar(v,n,mx,mn,1.0f/sc);}
-#define PARSE_FL_AS_US(v,n,mx,mn,sc) \
-    if(rw==QB_Parser_Dir_Read){AddFloatAsUnsignedShort(v,n,sc);}else{GetFloatAsUnsignedShort(v,n,mx,mn,1.0f/sc);}
-#define PARSE_SL_AS_SL(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddSignedLongAsSignedLong((int32_t*)v,n);}else{GetSignedLongAsSignedLong((int32_t*)v,n,mx,mn);}
-#define PARSE_SL_AS_SS(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddSignedLongAsSignedShort((int32_t*)v,n);}else{GetSignedLongAsSignedShort((int32_t*)v,n,mx,mn);}
-#define PARSE_SL_AS_SC(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddSignedLongAsSignedChar((int32_t*)v,n);}else{GetSignedLongAsSignedChar((int32_t*)v,n,mx,mn);}
-#define PARSE_SL_AS_UC(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddSignedLongAsUnsignedChar((int32_t*)v,n);}else{GetSignedLongAsUnsignedChar((int32_t*)v,n,mx,mn);}
-#define PARSE_SS_AS_SS(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddSignedShortAsSignedShort(v,n);}else{GetSignedShortAsSignedShort(v,n,mx,mn);}
-#define PARSE_SS_AS_SC(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddSignedShortAsSignedChar(v,n);}else{GetSignedShortAsSignedChar(v,n,mx,mn);}
-#define PARSE_SS_AS_UC(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddSignedShortAsUnsignedChar(v,n);}else{GetSignedShortAsUnsignedChar(v,n,mx,mn);}
-#define PARSE_SC_AS_SC(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddSignedCharAsSignedChar(v,n);}else{GetSignedCharAsSignedChar(v,n,mx,mn);}
-#define PARSE_UC_AS_UC(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddUnsignedCharAsUnsignedChar(v,n);}else{GetUnsignedCharAsUnsignedChar(v,n,mx,mn);}
-#define PARSE_US_AS_US(v,n,mx,mn) \
-    if(rw==QB_Parser_Dir_Read){AddUnsignedShortAsUnsignedShort(v,n);}else{GetUnsignedShortAsUnsignedShort(v,n,mx,mn);}
-#define PARSE_BITS_AS_UC(v,sb,nb) \
-    if(rw==QB_Parser_Dir_Read){AddBitsAsByte(v,sb,nb);}else{GetBitsAsByte(v,sb,nb);}
+/* Macros -- all now take an explicit ctx as the first argument. Every call
+ * site must be updated (compile error otherwise: wrong macro arg count),
+ * which makes a missed migration site unrepresentable rather than a latent
+ * bug. */
+#define PARSE_FL_AS_SL(ctx,v,n,mx,mn,sc) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddFloatAsSignedLong(ctx,v,n,sc);}else{GetFloatAsSignedLong(ctx,v,n,mx,mn,1.0f/sc);}
+#define PARSE_FL_AS_SS(ctx,v,n,mx,mn,sc) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddFloatAsSignedShort(ctx,v,n,sc);}else{GetFloatAsSignedShort(ctx,v,n,mx,mn,1.0f/sc);}
+#define PARSE_FL_AS_SC(ctx,v,n,mx,mn,sc) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddFloatAsSignedChar(ctx,v,n,sc);}else{GetFloatAsSignedChar(ctx,v,n,mx,mn,1.0f/sc);}
+#define PARSE_FL_AS_UC(ctx,v,n,mx,mn,sc) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddFloatAsUnsignedChar(ctx,v,n,sc);}else{GetFloatAsUnsignedChar(ctx,v,n,mx,mn,1.0f/sc);}
+#define PARSE_FL_AS_US(ctx,v,n,mx,mn,sc) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddFloatAsUnsignedShort(ctx,v,n,sc);}else{GetFloatAsUnsignedShort(ctx,v,n,mx,mn,1.0f/sc);}
+#define PARSE_SL_AS_SL(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddSignedLongAsSignedLong(ctx,(int32_t*)v,n);}else{GetSignedLongAsSignedLong(ctx,(int32_t*)v,n,mx,mn);}
+#define PARSE_SL_AS_SS(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddSignedLongAsSignedShort(ctx,(int32_t*)v,n);}else{GetSignedLongAsSignedShort(ctx,(int32_t*)v,n,mx,mn);}
+#define PARSE_SL_AS_SC(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddSignedLongAsSignedChar(ctx,(int32_t*)v,n);}else{GetSignedLongAsSignedChar(ctx,(int32_t*)v,n,mx,mn);}
+#define PARSE_SL_AS_UC(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddSignedLongAsUnsignedChar(ctx,(int32_t*)v,n);}else{GetSignedLongAsUnsignedChar(ctx,(int32_t*)v,n,mx,mn);}
+#define PARSE_SS_AS_SS(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddSignedShortAsSignedShort(ctx,v,n);}else{GetSignedShortAsSignedShort(ctx,v,n,mx,mn);}
+#define PARSE_SS_AS_SC(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddSignedShortAsSignedChar(ctx,v,n);}else{GetSignedShortAsSignedChar(ctx,v,n,mx,mn);}
+#define PARSE_SS_AS_UC(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddSignedShortAsUnsignedChar(ctx,v,n);}else{GetSignedShortAsUnsignedChar(ctx,v,n,mx,mn);}
+#define PARSE_SC_AS_SC(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddSignedCharAsSignedChar(ctx,v,n);}else{GetSignedCharAsSignedChar(ctx,v,n,mx,mn);}
+#define PARSE_UC_AS_UC(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddUnsignedCharAsUnsignedChar(ctx,v,n);}else{GetUnsignedCharAsUnsignedChar(ctx,v,n,mx,mn);}
+#define PARSE_US_AS_US(ctx,v,n,mx,mn) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddUnsignedShortAsUnsignedShort(ctx,v,n);}else{GetUnsignedShortAsUnsignedShort(ctx,v,n,mx,mn);}
+#define PARSE_BITS_AS_UC(ctx,v,sb,nb) \
+    if((ctx)->rw==QB_Parser_Dir_Read){AddBitsAsByte(ctx,v,sb,nb);}else{GetBitsAsByte(ctx,v,sb,nb);}
 
 #endif /* HAMFLY_QX_PROTOCOL_H */

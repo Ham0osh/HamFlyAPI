@@ -25,6 +25,18 @@
  *  - 'QX_SendMsg2CommsPort_CB' edited to write to 'qx_active_gimbal->txbuf'.
  *  - 'qx_active_gimbal_ptr' and '#define qx_active_gimbal' added for the above.
  *  - Updated includes to consolidated files.
+ *
+ * v2 divergences from the Freefly original (2026-07-20):
+ *  - F4 : QX_ParsePacket_Cli_MoVI_Ctrl_CB() now owns a stack-local
+ *         QX_ParserCtx_t and passes &ctx to every PARSE_*_AS_* macro and
+ *         QX_Parser_* call. Parser state is no longer shared between the
+ *         packet-build (send) and packet-parse (receive) directions. No
+ *         change to packet layout, field order, or scaling.
+ *  - F6 : temp_UC_buffer[] is zero-initialised so the three "reserved" bytes
+ *         of the QX277 control frame are deterministic zeros rather than
+ *         stack garbage.
+ *
+ * Rationale: build/review/findings.md. NOT build-verified.
  */
 
 #include <stdlib.h>
@@ -96,29 +108,42 @@ static void ff_api_send(void)
 }
 
 /* ============================================================
- * Parser callback -- unchanged from original
+ * Parser callback -- F4: parser state (`rw`/msgPtr, formerly file-scope
+ * globals in hamfly_qx_protocol.c) now lives in a stack-local QX_ParserCtx_t
+ * `ctx`, scoped to this single invocation. Every PARSE_*_AS_* macro and
+ * QX_Parser_* accessor call below now takes `&ctx` explicitly; nothing else
+ * in this function's logic changed.
  * ============================================================ */
 static uint8_t *QX_ParsePacket_Cli_MoVI_Ctrl_CB(QX_Msg_t *Msg_p)
 {
-    uint8_t  temp_UC_buffer[10];
+    /* HAMFLY-DIVERGENCE (F6) — Freefly original left this uninitialised.
+     * Zero-initialised: the first three bytes of the 277 payload are
+     * "reserved" and are serialised straight out of this buffer, so leaving
+     * it indeterminate puts three bytes of stack garbage on the wire. */
+    uint8_t  temp_UC_buffer[10] = {0};
     int16_t  temp_SS_buffer[10];
     uint16_t temp_US_buffer[10];
 
+    /* Per-call parser context (F4). Zero-init is a valid starting state:
+     * ctx.rw == QB_Parser_Dir_Read (enumerator 0), overwritten below before
+     * any PARSE_* use on every path that reaches one. */
+    QX_ParserCtx_t ctx = {0};
+
     switch (Msg_p->Parse_Type) {
-        case QX_PARSE_TYPE_WRITE_REL_SEND: QX_Parser_SetDir_Read();     break;
-        case QX_PARSE_TYPE_WRITE_ABS_SEND: QX_Parser_SetDir_Read();     break;
-        case QX_PARSE_TYPE_CURVAL_RECV:    QX_Parser_SetDir_WriteAbs(); break;
+        case QX_PARSE_TYPE_WRITE_REL_SEND: QX_Parser_SetDir_Read(&ctx);     break;
+        case QX_PARSE_TYPE_WRITE_ABS_SEND: QX_Parser_SetDir_Read(&ctx);     break;
+        case QX_PARSE_TYPE_CURVAL_RECV:    QX_Parser_SetDir_WriteAbs(&ctx); break;
         default: break;
     }
 
-    QX_Parser_SetMsgPtr(Msg_p->BufPayloadStart_p);
+    QX_Parser_SetMsgPtr(&ctx, Msg_p->BufPayloadStart_p);
 
     switch (Msg_p->Header.Attrib) {
 
         case 277:
             if (Msg_p->Parse_Type != QX_PARSE_TYPE_WRITE_ABS_SEND) break;
 
-            PARSE_UC_AS_UC(temp_UC_buffer, 3, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, temp_UC_buffer, 3, 0xFF, 0);
 
             {
                 uint8_t pan_input_type;
@@ -159,13 +184,13 @@ static uint8_t *QX_ParsePacket_Cli_MoVI_Ctrl_CB(QX_Msg_t *Msg_p)
                     temp_UC_buffer[0] &= ~INPUT_CONTROL_KILL;
             }
 
-            PARSE_UC_AS_UC(temp_UC_buffer, 1, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, temp_UC_buffer, 1, 0xFF, 0);
 
-            PARSE_FL_AS_SS(&FreeflyAPI.control.roll.value,  1, 32767.0f, -32767.0f, 32767.0f);
-            PARSE_FL_AS_SS(&FreeflyAPI.control.tilt.value,  1, 32767.0f, -32767.0f, 32767.0f);
-            PARSE_FL_AS_SS(&FreeflyAPI.control.pan.value,   1, 32767.0f, -32767.0f, 32767.0f);
+            PARSE_FL_AS_SS(&ctx, &FreeflyAPI.control.roll.value,  1, 32767.0f, -32767.0f, 32767.0f);
+            PARSE_FL_AS_SS(&ctx, &FreeflyAPI.control.tilt.value,  1, 32767.0f, -32767.0f, 32767.0f);
+            PARSE_FL_AS_SS(&ctx, &FreeflyAPI.control.pan.value,   1, 32767.0f, -32767.0f, 32767.0f);
             temp_SS_buffer[0] = 0;
-            PARSE_SS_AS_SS(temp_SS_buffer, 1, 0xFFFF, 0);
+            PARSE_SS_AS_SS(&ctx, temp_SS_buffer, 1, 0xFFFF, 0);
 
             {
                 uint8_t focus_input_type;
@@ -192,61 +217,61 @@ static uint8_t *QX_ParsePacket_Cli_MoVI_Ctrl_CB(QX_Msg_t *Msg_p)
                 temp_UC_buffer[0] = focus_input_type | iris_input_type | zoom_input_type;
             }
 
-            PARSE_UC_AS_UC(temp_UC_buffer, 1, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, temp_UC_buffer, 1, 0xFF, 0);
 
             temp_US_buffer[0] = (uint16_t)(FreeflyAPI.control.focus.value * (0xFFFF / 2) + (0xFFFF / 2));
             temp_US_buffer[1] = (uint16_t)(FreeflyAPI.control.iris.value  * (0xFFFF / 2) + (0xFFFF / 2));
             temp_US_buffer[2] = (uint16_t)(FreeflyAPI.control.zoom.value  * (0xFFFF / 2) + (0xFFFF / 2));
-            PARSE_US_AS_US(temp_US_buffer, 3, 0xFFFF, 0);
+            PARSE_US_AS_US(&ctx, temp_US_buffer, 3, 0xFFFF, 0);
 
-            PARSE_BITS_AS_UC(&FreeflyAPI.control.fiz_clearFaults_all_flag,  0, 1);
-            PARSE_BITS_AS_UC(&FreeflyAPI.control.fiz_autoCalStart_all_flag, 1, 1);
-            PARSE_BITS_AS_UC(&FreeflyAPI.control.fiz_record_button_flag,    4, 1);
-            PARSE_BITS_AS_UC(&FreeflyAPI.control.fiz_setSubRangeLim_F_flag, 5, 1);
-            PARSE_BITS_AS_UC(&FreeflyAPI.control.fiz_setSubRangeLim_I_flag, 6, 1);
-            PARSE_BITS_AS_UC(&FreeflyAPI.control.fiz_setSubRangeLim_Z_flag, 7, 1);
-            QX_Parser_AdvMsgPtr();
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.control.fiz_clearFaults_all_flag,  0, 1);
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.control.fiz_autoCalStart_all_flag, 1, 1);
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.control.fiz_record_button_flag,    4, 1);
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.control.fiz_setSubRangeLim_F_flag, 5, 1);
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.control.fiz_setSubRangeLim_I_flag, 6, 1);
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.control.fiz_setSubRangeLim_Z_flag, 7, 1);
+            QX_Parser_AdvMsgPtr(&ctx);
 
             temp_UC_buffer[0] = 0;
-            PARSE_UC_AS_UC(temp_UC_buffer, 1, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, temp_UC_buffer, 1, 0xFF, 0);
             break;
 
         case 287:
             if (Msg_p->Parse_Type != QX_PARSE_TYPE_CURVAL_RECV) break;
 
-            PARSE_UC_AS_UC(temp_UC_buffer, 3, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, temp_UC_buffer, 3, 0xFF, 0);
 
-            PARSE_UC_AS_UC(temp_UC_buffer, 2, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, temp_UC_buffer, 2, 0xFF, 0);
             FreeflyAPI.status.battery_v_left  = ((float)temp_UC_buffer[0] * 0.1f) + 10.0f;
             FreeflyAPI.status.battery_v_right = ((float)temp_UC_buffer[1] * 0.1f) + 10.0f;
             if (FreeflyAPI.status.battery_v_left  == 10.0f) FreeflyAPI.status.battery_v_left  = 0;
             if (FreeflyAPI.status.battery_v_right == 10.0f) FreeflyAPI.status.battery_v_right = 0;
 
-            PARSE_UC_AS_UC(&FreeflyAPI.status.gimbal_Status1, 1, 0xFF, 0);
-            PARSE_UC_AS_UC(&FreeflyAPI.status.gimbal_Status2, 1, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, &FreeflyAPI.status.gimbal_Status1, 1, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, &FreeflyAPI.status.gimbal_Status2, 1, 0xFF, 0);
 
-            PARSE_FL_AS_SS(&FreeflyAPI.status.gimbal_r, 1, 32767.0f, -32767.0f, 32767.0f);
-            PARSE_FL_AS_SS(&FreeflyAPI.status.gimbal_i, 1, 32767.0f, -32767.0f, 32767.0f);
-            PARSE_FL_AS_SS(&FreeflyAPI.status.gimbal_j, 1, 32767.0f, -32767.0f, 32767.0f);
-            PARSE_FL_AS_SS(&FreeflyAPI.status.gimbal_k, 1, 32767.0f, -32767.0f, 32767.0f);
+            PARSE_FL_AS_SS(&ctx, &FreeflyAPI.status.gimbal_r, 1, 32767.0f, -32767.0f, 32767.0f);
+            PARSE_FL_AS_SS(&ctx, &FreeflyAPI.status.gimbal_i, 1, 32767.0f, -32767.0f, 32767.0f);
+            PARSE_FL_AS_SS(&ctx, &FreeflyAPI.status.gimbal_j, 1, 32767.0f, -32767.0f, 32767.0f);
+            PARSE_FL_AS_SS(&ctx, &FreeflyAPI.status.gimbal_k, 1, 32767.0f, -32767.0f, 32767.0f);
 
-            PARSE_UC_AS_UC(temp_UC_buffer, 2, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, temp_UC_buffer, 2, 0xFF, 0);
 
-            PARSE_BITS_AS_UC(&FreeflyAPI.status.focus_range_limits_active, 0, 1);
-            PARSE_BITS_AS_UC(&FreeflyAPI.status.iris_range_limits_active,  1, 1);
-            PARSE_BITS_AS_UC(&FreeflyAPI.status.zoom_range_limits_active,  2, 1);
-            QX_Parser_AdvMsgPtr();
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.status.focus_range_limits_active, 0, 1);
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.status.iris_range_limits_active,  1, 1);
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.status.zoom_range_limits_active,  2, 1);
+            QX_Parser_AdvMsgPtr(&ctx);
 
-            PARSE_BITS_AS_UC(&FreeflyAPI.status.camera_recording, 0, 1);
-            QX_Parser_AdvMsgPtr();
+            PARSE_BITS_AS_UC(&ctx, &FreeflyAPI.status.camera_recording, 0, 1);
+            QX_Parser_AdvMsgPtr(&ctx);
 
-            PARSE_UC_AS_UC((uint8_t *)&FreeflyAPI.status.focus_state, 1, 0xFF, 0);
-            PARSE_UC_AS_UC((uint8_t *)&FreeflyAPI.status.iris_state,  1, 0xFF, 0);
-            PARSE_UC_AS_UC((uint8_t *)&FreeflyAPI.status.zoom_state,  1, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, (uint8_t *)&FreeflyAPI.status.focus_state, 1, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, (uint8_t *)&FreeflyAPI.status.iris_state,  1, 0xFF, 0);
+            PARSE_UC_AS_UC(&ctx, (uint8_t *)&FreeflyAPI.status.zoom_state,  1, 0xFF, 0);
 
-            PARSE_US_AS_US(&FreeflyAPI.status.focus_position, 1, 0xFFFF, 0);
-            PARSE_US_AS_US(&FreeflyAPI.status.iris_position,  1, 0xFFFF, 0);
-            PARSE_US_AS_US(&FreeflyAPI.status.zoom_position,  1, 0xFFFF, 0);
+            PARSE_US_AS_US(&ctx, &FreeflyAPI.status.focus_position, 1, 0xFFFF, 0);
+            PARSE_US_AS_US(&ctx, &FreeflyAPI.status.iris_position,  1, 0xFFFF, 0);
+            PARSE_US_AS_US(&ctx, &FreeflyAPI.status.zoom_position,  1, 0xFFFF, 0);
             break;
 
         default:
@@ -254,7 +279,7 @@ static uint8_t *QX_ParsePacket_Cli_MoVI_Ctrl_CB(QX_Msg_t *Msg_p)
             break;
     }
 
-    return (uint8_t *)QX_Parser_GetMsgPtr();
+    return (uint8_t *)QX_Parser_GetMsgPtr(&ctx);
 }
 
 /* ============================================================

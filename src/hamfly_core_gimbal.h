@@ -101,8 +101,12 @@ void hamfly_on_uart_err_flags (hamfly_gimbal_t *g, uint8_t err_mask);
 //  - Send control packets built by the user.
 //  - Send a kill command to stop the gimbal immediately.
 void            hamfly_pump         (hamfly_gimbal_t *g);
+/* Returns HAMFLY_ERR_BAD_STATE if ctl->enable == 0 (v2 send-gate, see
+ * hamfly_control_init), HAMFLY_ERR_ENCODE if ctl is NULL, HAMFLY_ERR_UART on
+ * a UART fault. pan/tilt/roll are clamped to ±1.0 before serialisation. */
 hamfly_result_t hamfly_send_control (hamfly_gimbal_t *g,
                                      const hamfly_control_t *ctl);
+/* Emergency stop. Bypasses the `enable` send-gate by design. */
 void            hamfly_kill         (hamfly_gimbal_t *g);
 
 // And extensions from Hamfly to...
@@ -139,7 +143,10 @@ void hamfly_on_frame_complete(hamfly_gimbal_t *g);
 
 /* Zero-initialise a control struct to a safe inert state:
  * all axes DEFER, enable=0, kill=0.
- * Using enable=0 (not 1) so the app explicitly opts in before sending. */
+ * Using enable=0 (not 1) so the app explicitly opts in before sending.
+ * v2: this opt-in is ENFORCED — hamfly_send_control() rejects a struct with
+ * enable=0 and returns HAMFLY_ERR_BAD_STATE. In v1 the field was documented
+ * but never read. Set enable=1 when you are ready to command the gimbal. */
 void hamfly_control_init(hamfly_control_t *c);
 
 /* Returns 1 if the last commanded packet had kill=1, else 0.
