@@ -278,9 +278,9 @@ hamfly_result_t hamfly_send_control(hamfly_gimbal_t *g,
 // ============================================================================
 // Hamfly Kill: Safely kill the gimbal.
 // ============================================================================
-void hamfly_kill(hamfly_gimbal_t *g)
+hamfly_result_t hamfly_kill(hamfly_gimbal_t *g)
 {
-    if (!g) return;
+    if (!g) return HAMFLY_ERR_UART;
     // Enable kill flag and send.
     hamfly_control_t k = g->ctl;
     k.kill = 1u;
@@ -290,7 +290,9 @@ void hamfly_kill(hamfly_gimbal_t *g)
      * otherwise cause the stop command to be silently dropped. The gate
      * exists to prevent accidental motion, never to block a stop. */
     k.enable = 1u;
-    (void)hamfly_send_control(g, &k);
+    /* v2: status is returned, not discarded. A stop that failed to reach the
+     * gimbal must be visible to the caller. */
+    return hamfly_send_control(g, &k);
 }
 
 // ============================================================================

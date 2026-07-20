@@ -106,8 +106,11 @@ void            hamfly_pump         (hamfly_gimbal_t *g);
  * a UART fault. pan/tilt/roll are clamped to ±1.0 before serialisation. */
 hamfly_result_t hamfly_send_control (hamfly_gimbal_t *g,
                                      const hamfly_control_t *ctl);
-/* Emergency stop. Bypasses the `enable` send-gate by design. */
-void            hamfly_kill         (hamfly_gimbal_t *g);
+/* Emergency stop. Bypasses the `enable` send-gate by design.
+ * v2: returns a status instead of void — HAMFLY_OK (0) if the stop packet was
+ * transmitted, HAMFLY_ERR_UART (1) on a UART fault or a NULL gimbal. Check it:
+ * a silently-dropped stop is the worst failure this API has. */
+hamfly_result_t hamfly_kill         (hamfly_gimbal_t *g);
 
 // And extensions from Hamfly to...
 // - Request telemetry attributes by ID and respond into the gimbal struct.
@@ -127,9 +130,9 @@ void hamfly_get_telemetry  (hamfly_gimbal_t *g, hamfly_telemetry_t  *out);
 void hamfly_get_statistics (hamfly_gimbal_t *g, hamfly_statistics_t *out);
 
 /* Exact int16 pan/tilt/roll words the last hamfly_send_control() put on the
- * QX277 wire (mirrors AddFloatAsSignedShort: scale 32767, round-half-away, no
- * clamp). Reads g->ctl. NULL out-pointers are skipped. Lets a logger record the
- * transmitted word rather than re-scaling a float. */
+ * QX277 wire (scale 32767, round-half-away-from-zero, and the same ±1.0 clamp
+ * the send path applies since v2). Reads g->ctl. NULL out-pointers are skipped.
+ * Lets a logger record the transmitted word rather than re-scaling a float. */
 void hamfly_get_control_wire_i16(const hamfly_gimbal_t *g,
                                  int16_t *pan, int16_t *tilt, int16_t *roll);
 
