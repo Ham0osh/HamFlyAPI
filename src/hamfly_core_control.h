@@ -50,7 +50,7 @@ typedef enum {
  * TODO: measure via experiment T1 in docs/2026-07-08_encoding_timing_report.md
  *       (command a known normalized rate, time/scope the gimbal sweep, back out
  *       mrad/s), then replace the 0 here with the measured constant. */
-#define HAMFLY_RATE_FULLSCALE_MRAD_S 0  /* 0 == undefined (see TODO / T1) */
+#define HAMFLY_RATE_FULLSCALE_MRAD_S 436.33f  // Confirmed in-lab test
 
 // Control packet struct. Gets built by the user and sent to the gimbal on
 // hamfly_send_control() in hamfly_core_control.c.

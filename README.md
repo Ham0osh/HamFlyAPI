@@ -122,6 +122,9 @@ blocked by the opt-in.
 - **Control values are clamped to ±1.0** before serialisation. Previously
   `|value| > 1.0` overflowed the int16 and wrapped, so `1.5` became `-16386` —
   a near-full-scale command in the *opposite* direction. It now saturates.
+- **`hamfly_kill()` returns `hamfly_result_t`** instead of `void`, so a failed stop is
+  detectable: `HAMFLY_OK` (0) if transmitted, `HAMFLY_ERR_UART` (1) otherwise. Existing
+  callers that ignore the return still compile unchanged — but you should check it.
 - **QX277 reserved bytes are zeroed** instead of being sent as stack garbage.
 - **Varint decode is bounded** by the received body length.
 - **TX build failures are surfaced** rather than discarded.

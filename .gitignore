@@ -37,3 +37,6 @@ obj/
 
 # Dependency files
 *.d
+
+# Host test binaries
+*.exe
