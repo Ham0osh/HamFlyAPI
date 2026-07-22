@@ -296,6 +296,28 @@ hamfly_result_t hamfly_kill(hamfly_gimbal_t *g)
 }
 
 // ============================================================================
+// Shared request-slot arbitration. See hamfly_core_gimbal.h for the contract.
+// There is one slot; a second request in flight overwrites the first and one
+// of the two replies is silently discarded.
+// ============================================================================
+bool hamfly_request_busy(const hamfly_gimbal_t *g)
+{
+    /* Claimed from the moment a request is sent until the consumer releases
+     * it. Deliberately NOT `pending_attr && !pending_ready`: that would report
+     * "free" in the window between a reply landing and the owner consuming it,
+     * which is exactly when a competing poll would overwrite the payload. */
+    return (g != NULL) && (g->pending_attr != 0u);
+}
+
+void hamfly_request_release(hamfly_gimbal_t *g)
+{
+    if (!g) return;
+    g->pending_attr        = 0u;
+    g->pending_ready       = false;
+    g->pending_payload_len = 0u;
+}
+
+// ============================================================================
 // Hamfly Request Attribute: Request read of an attr ID.
 // ============================================================================
 hamfly_result_t hamfly_request_attr(hamfly_gimbal_t *g, uint16_t attr_id)

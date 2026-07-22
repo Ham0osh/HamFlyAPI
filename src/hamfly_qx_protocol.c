@@ -347,6 +347,21 @@ static QX_Stat_e QX_RxMsg(QX_Msg_t *RxMsg_p)
     RxMsg_p->MsgBufStart_p = &RxMsg_p->MsgBuf[0];
     RxMsg_p->AttNotHandled = 0;
 
+    /* HAMFLY-DIVERGENCE (F14) — not in the Freefly reference.
+     * Clear the payload pointer before parsing. QX_StreamRxCharSM() reports
+     * "packet complete" regardless of this function's return, so if the header
+     * parse bails out below (the Legacy_Header path with no hook installed),
+     * BufPayloadStart_p would otherwise still hold the PREVIOUS frame's value.
+     * hamfly_pump() would then decode stale bytes as if they were fresh and
+     * produce plausible-looking wrong telemetry rather than no telemetry.
+     * Nulling it here makes pump's existing `if (pay)` guard sufficient.
+     *
+     * Deliberately NOT done by rejecting non-OK returns: QX_RxMsg also returns
+     * QX_STAT_ERROR_ATT_NOT_HANDLED for any attribute with no registered
+     * parser callback, which is the normal path for every telemetry/settings
+     * read. Dropping those would break all attribute reads. */
+    RxMsg_p->BufPayloadStart_p = NULL;
+
     if (RxMsg_p->Legacy_Header) {
         if (QX_ParseHeader_Legacy != NULL) QX_ParseHeader_Legacy(RxMsg_p);
         else return QX_STAT_ERROR;

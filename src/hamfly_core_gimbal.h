@@ -121,9 +121,31 @@ hamfly_result_t hamfly_request_attr_capture(hamfly_gimbal_t *g,
                                             uint8_t *tx_buf, 
                                             uint8_t tx_buf_max, 
                                             uint8_t *tx_len_out);
-hamfly_result_t hamfly_write_attr_u8       (hamfly_gimbal_t *g, 
-                                            uint16_t attr_id, 
+hamfly_result_t hamfly_write_attr_u8       (hamfly_gimbal_t *g,
+                                            uint16_t attr_id,
                                             uint8_t value);
+
+/* --- Shared request-slot arbitration ---------------------------------------
+ * hamfly_gimbal_t has exactly ONE outstanding-request slot
+ * (pending_attr / pending_ready / pending_payload), matched by attribute id
+ * alone, and it is shared by hamfly_request_attr(),
+ * hamfly_settings_send_qb_read() and the settings RMW engine.
+ *
+ * Two requests in flight COLLIDE: the second overwrites pending_attr, and
+ * whichever reply arrives second is silently discarded. A routine telemetry
+ * poll issued while a settings transaction is mid-flight will therefore break
+ * that transaction, and neither side is told.
+ *
+ * Discipline: check hamfly_request_busy() before issuing ANY request, and call
+ * hamfly_request_release() once you have consumed pending_payload. */
+
+/* True while the slot is claimed: a request is outstanding, OR a reply has
+ * landed and has not been released yet. NOTE the slot is not auto-freed when a
+ * reply arrives — the consumer must release it, otherwise this stays true. */
+bool hamfly_request_busy(const hamfly_gimbal_t *g);
+
+/* Free the request slot. Call after consuming pending_payload. */
+void hamfly_request_release(hamfly_gimbal_t *g);
 
 /* Accessors */
 void hamfly_get_telemetry  (hamfly_gimbal_t *g, hamfly_telemetry_t  *out);
